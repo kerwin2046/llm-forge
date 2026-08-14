@@ -1,161 +1,377 @@
-# llm-forge Learning Roadmap
+# llm-forge Learning Roadmap (Detailed)
 
-Build a mental model of LLM APIs from scratch, and leave runnable code in this repo at every step.
+A step-by-step map from **one HTTP call** to a full **LLM → RAG → Tool → Agent** mental model.
+
+Use this doc as a notebook: each `📷 Image slot` is a place to paste a screenshot, diagram, or hand-drawn sketch.
 
 ---
 
-## Overview
+## Part 0: The Big Picture — LLM Ecosystem
+
+> Before touching code, understand where each piece lives in the stack.
+
+### 0.1 Layered architecture
 
 ```mermaid
-graph TD
-    A[Phase 1 Basic Calls] --> B[Phase 2 Streaming]
-    B --> C[Phase 3 Multi-turn Chat]
-    C --> D[Phase 4 Robustness]
-    D --> E[Phase 5 Tool Calling]
-    E --> F[Phase 6 RAG]
-    F --> G[Phase 7 Advanced]
+graph TB
+    subgraph UserLayer["User Layer"]
+        U[User / App UI]
+    end
 
-    A --> A1[SDK non-streaming]
-    A --> A2[Native HTTP non-streaming]
-    B --> B1[SDK streaming]
-    B --> B2[Native HTTP SSE]
-    C --> C1[Maintain messages history]
-    C --> C2[Interactive terminal chat]
-    D --> D1[Error handling and retry]
-    D --> D2[Token counting and truncation]
-    E --> E1[Function Calling]
-    F --> F1[Embeddings]
-    F --> F2[Vector retrieval and QA]
-    G --> G1[Async concurrency]
-    G --> G2[Agent orchestration]
+    subgraph AppLayer["Application Layer — you build this"]
+        CHAT[Chat loop]
+        RAG[RAG pipeline]
+        TOOLS[Tool runner]
+        AGENT[Agent orchestrator]
+    end
+
+    subgraph APILayer["API Layer"]
+        SDK[OpenAI SDK]
+        HTTP[Raw HTTP / SSE]
+    end
+
+    subgraph ProviderLayer["Provider Layer"]
+        DS[DeepSeek API]
+        OAI[OpenAI API]
+        Others[Other providers]
+    end
+
+    subgraph ModelLayer["Model Layer — black box"]
+        LLM[LLM weights + inference]
+    end
+
+    U --> CHAT
+    U --> AGENT
+    CHAT --> SDK
+    RAG --> SDK
+    TOOLS --> SDK
+    AGENT --> TOOLS
+    AGENT --> RAG
+    AGENT --> SDK
+    SDK --> HTTP
+    HTTP --> DS
+    DS --> LLM
 ```
+
+**📷 Image slot 0.1-A** — Your own version of this stack diagram (label what you control vs what is external).
+
+**📷 Image slot 0.1-B** — Screenshot of DeepSeek docs homepage / API reference (anchor: "this is the provider").
+
+---
+
+### 0.2 One request lifecycle (non-streaming)
+
+```mermaid
+sequenceDiagram
+    participant App as Your App
+    participant SDK as OpenAI SDK
+    participant API as DeepSeek API
+    participant Model as LLM
+
+    App->>SDK: messages + model + params
+    SDK->>SDK: serialize JSON
+    SDK->>API: POST /chat/completions
+    API->>Model: tokenize + forward pass
+    Model-->>API: generated tokens
+    API-->>SDK: JSON response
+    SDK-->>App: ChatCompletion object
+    App->>App: extract choices[0].message.content
+```
+
+**Key insight:** The model is **stateless**. Your app must resend history every time.
+
+**📷 Image slot 0.2-A** — Sequence diagram (draw or export from Mermaid).
+
+**📷 Image slot 0.2-B** — Raw JSON request body screenshot (from logs or DevTools).
+
+**📷 Image slot 0.2-C** — Raw JSON response screenshot, with `choices[0].message.content` highlighted.
+
+---
+
+### 0.3 From Chat to Agent — capability ladder
+
+| Stage | What the system can do | Memory | External world | Your repo entry |
+|-------|------------------------|--------|----------------|-----------------|
+| 1. Basic call | Single Q&A | None | No | `main.py` |
+| 2. Streaming | Same, but UX is live | None | No | `main_stream.py` |
+| 3. Multi-turn chat | Context over turns | `messages[]` you maintain | No | `main_chat.py` |
+| 4. Robustness | Survives errors / long chats | Same + truncation | No | *(planned)* |
+| 5. Tool calling | Model triggers your code | Same | Yes (functions) | *(planned)* |
+| 6. RAG | Answers from your docs | Same + retrieved chunks | Yes (vector DB) | *(planned)* |
+| 7. Agent | Plan → act → observe loop | Same + tool results | Yes (many tools) | *(planned)* |
+
+**📷 Image slot 0.3-A** — Ladder diagram: Chat → Tools → RAG → Agent (annotate each rung).
+
+---
+
+### 0.4 Core data structure: `messages`
+
+Every chat-style API call revolves around this list:
+
+```json
+[
+  {"role": "system",    "content": "You are a helpful assistant."},
+  {"role": "user",      "content": "What is 2+2?"},
+  {"role": "assistant", "content": "4"},
+  {"role": "user",      "content": "What was my previous question?"}
+]
+```
+
+| Role | Purpose | Who writes it |
+|------|---------|---------------|
+| `system` | Behavior rules, persona, constraints | Your app (once per session) |
+| `user` | Human input | User |
+| `assistant` | Model output | Model (you store it) |
+| `tool` | Function result (Phase 5+) | Your app after running a tool |
+
+**📷 Image slot 0.4-A** — Table of roles with color coding (system=blue, user=green, assistant=gray).
+
+**📷 Image slot 0.4-B** — Annotated `messages` array growing over 3 turns (Turn 1 → Turn 2 → Turn 3).
+
+---
+
+### 0.5 Repo map (current + planned)
+
+```
+llm-forge/
+├── provider.py          # API client config
+├── messages.py          # Default message builders
+├── model.py             # Model name + params
+├── api/                 # SDK path
+│   ├── request.py       # Non-streaming
+│   ├── response.py
+│   └── stream.py        # Streaming
+├── native_http/         # Raw HTTP path (same logic, no SDK)
+├── chat/                # Multi-turn session (Phase 3)
+├── utils/               # Retry, errors (Phase 4) — planned
+├── tools/               # Function calling (Phase 5) — planned
+├── rag/                 # Embeddings + retrieval (Phase 6) — planned
+└── agent/               # Agent loop (Phase 7) — planned
+```
+
+**📷 Image slot 0.5-A** — Folder tree screenshot from your IDE.
 
 ---
 
 ## Phase 1: Basic Calls — Send a message, get a reply
 
-> Goal: Understand the minimal LLM API loop, and the difference between the SDK and raw HTTP.
+> **Goal:** Close the smallest possible loop: input → API → output.
+> **Agent relevance:** Every agent step ends with a chat completion call.
 
-### Step 1.1 Project structure and concern separation ✅
+**Status:** ✅ Done
 
-- [x] Split out `provider` (client config)
-- [x] Split out `messages` (conversation messages)
-- [x] Split out `model` (model name and params)
-- [x] Split out `api/request` + `api/response` (request and response)
+---
 
-**Core concepts**
+### Step 1.1 Separate concerns in code ✅
 
-| Concept | Description |
-|---------|-------------|
-| `provider` | Who serves the API (DeepSeek), via `base_url` + `api_key` |
-| `messages` | Conversation content; each item has `role` (system / user / assistant) and `content` |
-| `model` | Which model to use, plus params like `reasoning_effort` and `thinking` |
-| `response` | API response shape; the reply text lives in `choices[0].message.content` |
+**Why split files?** Later phases add tools, RAG, and agents. Clean boundaries prevent spaghetti.
 
-**Files**
+| Module | Responsibility | Analogy |
+|--------|----------------|---------|
+| `provider.py` | Who to call (URL, key) | Phone dial config |
+| `messages.py` | What to say | Script / dialogue |
+| `model.py` | Which brain + knobs | Model settings |
+| `api/request.py` | Send request | Press "send" |
+| `api/response.py` | Parse reply | Read inbox |
 
-- `provider.py` / `messages.py` / `model.py`
-- `api/request.py` / `api/response.py`
-- `main.py`
+- [x] Split `provider`
+- [x] Split `messages`
+- [x] Split `model`
+- [x] Split `api/request` + `api/response`
 
-**Verify**
+**📷 Image slot 1.1-A** — Module dependency diagram (arrows: `main → api → provider`).
 
+**📷 Image slot 1.1-B** — Side-by-side: monolithic `model.py` vs split modules.
+
+**Files:** `provider.py`, `messages.py`, `model.py`, `api/request.py`, `api/response.py`, `main.py`
+
+**Verify:**
 ```bash
 export DEEPSEEK_API_KEY=your_key
 python main.py
-# Should print the model reply
 ```
 
 ---
 
-### Step 1.2 OpenAI SDK call ✅
+### Step 1.2 OpenAI SDK — the shortcut layer ✅
 
-- [x] Use the `openai` package with `base_url` pointed at DeepSeek
-- [x] Call `client.chat.completions.create()`
+**What the SDK hides:**
 
-**What to understand**
+1. Python dict → JSON string
+2. HTTP POST with headers
+3. Wait for response
+4. JSON → typed Python object (`ChatCompletion`)
 
-- The SDK handles JSON serialization, HTTP, response parsing, and Python object wrapping
-- DeepSeek is OpenAI-compatible, so the same SDK works with a different `base_url`
+```python
+# What you write
+client.chat.completions.create(model="...", messages=[...])
 
-**Files**
+# What happens under the hood (conceptually)
+POST /chat/completions + Authorization + JSON body → parse response
+```
 
-- `provider.py` → `get_client()`
-- `api/request.py` → `create_chat_completion()`
+- [x] Configure `OpenAI(api_key=..., base_url="https://api.deepseek.com")`
+- [x] Call `chat.completions.create()`
+- [x] Read `response.choices[0].message.content`
+
+**📷 Image slot 1.2-A** — SDK call in IDE with breakpoint before/after.
+
+**📷 Image slot 1.2-B** — `ChatCompletion` object expanded in debugger (show `choices`, `usage`, etc.).
+
+**Deep dive: OpenAI-compatible providers**
+
+| Field | DeepSeek | OpenAI |
+|-------|----------|--------|
+| `base_url` | `https://api.deepseek.com` | `https://api.openai.com/v1` |
+| Endpoint | `/chat/completions` | `/chat/completions` |
+| Auth | `Bearer <key>` | `Bearer <key>` |
+| Body shape | Same | Same |
+
+**📷 Image slot 1.2-C** — Provider comparison table (your notes).
 
 ---
 
-### Step 1.3 Native HTTP call ✅
+### Step 1.3 Native HTTP — see the wire format ✅
 
-- [x] Send POST manually with stdlib `urllib`
-- [x] Build the JSON body, set headers, and parse the JSON response yourself
+**Why bother if SDK exists?** Agents, streaming, and debugging all make more sense when you've seen raw HTTP.
 
-**What to understand**
-
-Under the hood, the SDK is basically doing this:
-
+**Request (conceptual):**
 ```http
 POST https://api.deepseek.com/chat/completions
-Authorization: Bearer <API_KEY>
+Authorization: Bearer sk-...
 Content-Type: application/json
 
-{"model":"...", "messages":[...], ...}
+{
+  "model": "deepseek-v4-flash",
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant"},
+    {"role": "user", "content": "hello"}
+  ],
+  "stream": false,
+  "reasoning_effort": "high",
+  "thinking": {"type": "enabled"}
+}
 ```
 
-**Files**
+**Response (conceptual):**
+```json
+{
+  "id": "chatcmpl-...",
+  "object": "chat.completion",
+  "choices": [{
+    "index": 0,
+    "message": {
+      "role": "assistant",
+      "content": "Hello! How can I help you today?"
+    },
+    "finish_reason": "stop"
+  }],
+  "usage": {
+    "prompt_tokens": 20,
+    "completion_tokens": 12,
+    "total_tokens": 32
+  }
+}
+```
 
-- `native_http/request.py` → `create_chat_completion()`
-- `native_http/response.py` → `get_content()`
-- `main_native.py`
+- [x] Build JSON body manually
+- [x] Set `Authorization` and `Content-Type` headers
+- [x] Parse response JSON and extract content
 
-**Verify**
+**📷 Image slot 1.3-A** — HTTP request in a REST client (Postman / Insomnia / curl output).
 
+**📷 Image slot 1.3-B** — Full response JSON with `choices[0].message.content` circled.
+
+**📷 Image slot 1.3-C** — Side-by-side: SDK 5 lines vs native HTTP 30 lines.
+
+**Files:** `native_http/request.py`, `native_http/response.py`, `main_native.py`
+
+**Verify:**
 ```bash
 python main_native.py
-# Output should match main.py
 ```
+
+---
+
+### Step 1.4 Phase 1 checklist — mental model quiz
+
+Before moving on, you should be able to answer:
+
+- [ ] What three headers/body fields are required for a chat call?
+- [ ] Where does the assistant's text live in the response JSON?
+- [ ] Why does DeepSeek work with the `openai` Python package?
+- [ ] What is the difference between your code and the model weights?
+
+**📷 Image slot 1.4-A** — Your handwritten answers or flashcard screenshot.
 
 ---
 
 ## Phase 2: Streaming — Generate and display incrementally
 
-> Goal: Understand how streaming works, and the difference between SDK iteration and SSE.
+> **Goal:** Understand incremental delivery at both HTTP and application layers.
+> **Agent relevance:** Agents stream thoughts + tool calls to UI; users see progress in real time.
 
-### Step 2.1 SDK streaming ✅
-
-- [x] Set `stream=True`
-- [x] Iterate chunks and read `delta.content`
-- [x] Use `print(..., end="", flush=True)` for a typewriter effect
-
-**What to understand**
-
-- Non-streaming: wait until generation finishes → return one full JSON payload
-- Streaming: push partial output as it is generated → client reads chunks in a loop
-- Each chunk's `delta.content` is an **increment**, not the full text so far
-
-**Files**
-
-- `api/stream.py`
-- `main_stream.py`
-
-**Verify**
-
-```bash
-python main_stream.py
-# Text should appear character by character
-```
+**Status:** ✅ Done
 
 ---
 
-### Step 2.2 Native HTTP streaming (SSE) ✅
+### Step 2.1 Non-streaming vs streaming — two paradigms ✅
 
-- [x] Response type is `text/event-stream`
-- [x] Read line by line in `data: {...}` format
-- [x] Stop when you see `data: [DONE]`
+| | Non-streaming | Streaming |
+|---|---------------|-----------|
+| `stream` param | `false` | `true` |
+| HTTP body | One JSON at end | SSE stream (`text/event-stream`) |
+| Client reads | `response.json()` once | Loop: read chunk → chunk → … |
+| UX | Wait → full text | Typewriter effect |
+| Use case | Batch, short replies | Chat UI, long generation |
 
-**What to understand**
+```mermaid
+graph LR
+    subgraph NonStream["Non-streaming"]
+        A1[Request] --> B1[Wait...]
+        B1 --> C1[Full JSON]
+    end
 
-SSE (Server-Sent Events) looks like this:
+    subgraph Stream["Streaming"]
+        A2[Request] --> B2[chunk 1]
+        B2 --> B3[chunk 2]
+        B3 --> B4[chunk N]
+        B4 --> D2[DONE]
+    end
+```
+
+**📷 Image slot 2.1-A** — Terminal: `main.py` (pause then dump) vs `main_stream.py` (live output).
+
+**📷 Image slot 2.1-B** — Timeline diagram: server generating token-by-token.
+
+---
+
+### Step 2.2 SDK streaming — iterate chunks ✅
+
+**Application-layer concept:** Each chunk carries a **delta** (increment), not the full text.
+
+```python
+for chunk in stream:
+    delta = chunk.choices[0].delta.content  # e.g. "Hel", then "lo"
+    if delta:
+        print(delta, end="", flush=True)
+```
+
+- [x] Pass `stream=True` (via merged params)
+- [x] Iterate the stream object
+- [x] Accumulate deltas if you need the full reply later
+
+**📷 Image slot 2.2-A** — Print each chunk with `repr()` to see increments.
+
+**📷 Image slot 2.2-B** — Diagram: `delta="Hel"` + `delta="lo"` → `"Hello"`.
+
+**Files:** `api/stream.py`, `main_stream.py`
+
+---
+
+### Step 2.3 Native HTTP streaming — SSE protocol ✅
+
+**SSE (Server-Sent Events)** — server pushes lines over one long-lived HTTP response:
 
 ```
 data: {"choices":[{"delta":{"content":"Hi"}}]}
@@ -165,290 +381,758 @@ data: {"choices":[{"delta":{"content":" there"}}]}
 data: [DONE]
 ```
 
-**Files**
+**Parsing rules:**
+1. Read line by line from the socket
+2. Ignore empty lines
+3. Lines starting with `data: ` contain payload
+4. `data: [DONE]` means stop
+5. Otherwise JSON-parse the payload and read `choices[0].delta.content`
 
-- `native_http/stream.py`
-- `main_native_stream.py`
+- [x] Set `Accept: text/event-stream`
+- [x] Set `stream: true` in JSON body
+- [x] Parse SSE lines manually
 
-**Verify**
+**📷 Image slot 2.3-A** — Raw SSE stream captured in terminal (`curl -N` output).
 
-```bash
-python main_native_stream.py
-# Behavior should match main_stream.py
-```
+**📷 Image slot 2.3-B** — Annotated SSE line: prefix `data: ` vs JSON payload vs `[DONE]`.
+
+**Files:** `native_http/stream.py`, `main_native_stream.py`
 
 ---
 
-## Phase 3: Multi-turn Chat — Give the model conversation memory
+### Step 2.4 Phase 2 checklist
 
-> Goal: Maintain a `messages` list and build an interactive terminal chat loop.
+- [ ] Can you explain "read slices" at HTTP layer vs "read deltas" at app layer?
+- [ ] Why is `flush=True` needed for typewriter UX?
+- [ ] What happens if you forget to handle `[DONE]`?
 
-### Step 3.1 Understand messages history
+**📷 Image slot 2.4-A** — Your notes comparing chunk, delta, and token.
 
-- [x] Send the full conversation history on every request
-- [x] Append each new user message to the list
-- [x] Append the assistant reply back into the list too
+---
 
-**What to understand**
+## Phase 3: Multi-turn Chat — Conversation memory
 
-The model has no memory by itself; every request is stateless. "Memory" means you resend the prior `messages` each time.
+> **Goal:** Maintain `messages` across turns so the model has context.
+> **Agent relevance:** Agent memory is the same list, plus tool messages and summaries.
+
+**Status:** ✅ Done (SDK path); optional native path pending
+
+---
+
+### Step 3.1 Stateless model, stateful application ✅
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant App as Your App (messages[])
+    participant API as LLM API
+
+    User->>App: "My name is Alex"
+    App->>App: append user message
+    App->>API: send full messages[]
+    API-->>App: assistant reply
+    App->>App: append assistant message
+
+    User->>App: "What's my name?"
+    App->>App: append user message
+    Note over App,API: Same session — longer messages[]
+    App->>API: send full messages[] again
+    API-->>App: "Alex"
+```
+
+**Critical rule:** The API does not remember Turn 1 when you send Turn 2. **You** resend everything.
+
+- [x] Keep a persistent `messages` list in memory
+- [x] Append user input before each call
+- [x] Append assistant output after each call
+
+**📷 Image slot 3.1-A** — `messages` array growing: after turn 1, turn 2, turn 3.
+
+**📷 Image slot 3.1-B** — Network tab showing request body size increasing each turn.
+
+---
+
+### Step 3.2 Session abstraction ✅
+
+`ChatSession` encapsulates:
+- `system` prompt (always first)
+- `add_user()` / `add_assistant()`
+- `clear()` → reset to system-only
 
 ```python
-messages = [
-    {"role": "system", "content": "You are a helpful assistant"},
-    {"role": "user", "content": "My name is Alex"},
-    {"role": "assistant", "content": "Hi Alex!"},
-    {"role": "user", "content": "What's my name?"},  # Model can answer "Alex"
-]
+session = ChatSession()
+session.add_user("My name is Alex")
+# ... API call ...
+session.add_assistant("Hi Alex!")
+session.add_user("What's my name?")
+# messages now has 4 items (system + 3)
 ```
 
-**Planned files**
+- [x] Implement `chat/session.py`
+- [x] Expose `messages` property for API calls
 
-- `chat/session.py` → add/remove messages in the conversation list
-- `chat/loop.py` → read user input, call the API, update history
+**📷 Image slot 3.2-A** — Class diagram: `ChatSession` methods and internal `_messages`.
 
 ---
 
-### Step 3.2 Interactive terminal chat
+### Step 3.3 Interactive loop + streaming reply ✅
 
-- [x] Loop on user input with `input()`
-- [x] Stream the assistant reply
-- [x] Support an exit command (`exit` / `quit`)
-- [x] Optional: a clear-history command (`/clear`)
+**Loop logic:**
+```
+while True:
+    read user input
+    if exit → break
+    if /clear → reset session
+    append user message
+    stream assistant reply
+    append full assistant text to session
+```
 
-**Planned files**
+- [x] `input()` loop
+- [x] Stream while collecting full reply for history
+- [x] Commands: `exit`, `quit`, `/clear`
 
-- `main_chat.py` → entry point for the interactive loop
+**📷 Image slot 3.3-A** — Terminal screenshot of multi-turn name memory test.
 
-**Verify**
+**📷 Image slot 3.3-B** — Flowchart of `chat/loop.py`.
 
+**Files:** `chat/session.py`, `chat/loop.py`, `main_chat.py`
+
+**Verify:**
 ```bash
 python main_chat.py
-> My name is Alex
-# Model responds
-> What's my name?
-# Model should answer "Alex"
-> exit
 ```
 
 ---
 
-### Step 3.3 Native HTTP multi-turn chat (optional)
+### Step 3.4 Optional: native HTTP chat ⬜
 
-- [ ] Implement the same interactive flow with `native_http`
-- [ ] Compare code differences against the SDK version
+- [ ] Reuse `ChatSession` + `chat/loop.py` with `native_http/stream`
+- [ ] Compare: only the transport layer changes, session logic stays identical
 
-**Planned files**
+**📷 Image slot 3.4-A** — Venn diagram: shared session logic vs swapped HTTP layer.
 
-- `main_native_chat.py`
-
----
-
-## Phase 4: Robustness — Production essentials
-
-> Goal: Handle failures, rate limits, and oversized context safely.
-
-### Step 4.1 Error handling
-
-- [ ] Catch HTTP errors (401, 429, 500)
-- [ ] Catch network timeouts
-- [ ] Show user-friendly error messages
-
-**What to understand**
-
-| Status | Meaning | Typical handling |
-|--------|---------|------------------|
-| 401 | Invalid API key | Check env vars |
-| 429 | Rate limited | Wait and retry |
-| 500 | Server error | Retry or degrade gracefully |
-
-**Planned files**
-
-- `api/errors.py` or `utils/retry.py`
+**Planned file:** `main_native_chat.py`
 
 ---
 
-### Step 4.2 Retry logic
+### Step 3.5 Phase 3 checklist
 
-- [ ] Retry automatically after failure with exponential backoff
-- [ ] Set a max retry count
-- [ ] On 429, respect the `Retry-After` header when present
-
-**Planned files**
-
-- `utils/retry.py` → `with_retry()` decorator or wrapper
+- [ ] Why must assistant replies be appended to `messages`?
+- [ ] What breaks if you only send the latest user message?
+- [ ] Where would you persist history for tomorrow's session? (preview: Phase 4+ / DB)
 
 ---
 
-### Step 4.3 Token counting and context truncation
+## Phase 4: Robustness — Production-ready calls
 
-- [ ] Learn the model context window (e.g. 64K tokens)
-- [ ] Estimate total tokens in `messages`
-- [ ] Truncate old turns when over the limit (keep system + last N turns)
+> **Goal:** Handle failure, limits, and context overflow.
+> **Agent relevance:** Agents make many chained calls; one 429 should not crash the loop.
 
-**What to understand**
+**Status:** ⬜ Not started
 
-- Input and output share the same context window
-- Too much history → API error or silent truncation
-- Common strategies: sliding window, summarization
+---
 
-**Planned files**
+### Step 4.1 HTTP errors — know the failure modes
 
-- `chat/token_counter.py` → estimate token usage
-- `chat/truncate.py` → truncation strategy
+| Code | Name | Cause | Your action |
+|------|------|-------|-------------|
+| 401 | Unauthorized | Bad/missing API key | Fix env, fail fast |
+| 403 | Forbidden | Key lacks permission | Check account |
+| 429 | Too Many Requests | Rate limit | Backoff + retry |
+| 500 | Internal Server Error | Provider issue | Retry with limit |
+| 503 | Service Unavailable | Overloaded | Retry + jitter |
+| Timeout | — | Network / slow model | Retry or abort |
 
-**Dependency**
-
-```bash
-pip install tiktoken
+```mermaid
+graph TD
+    REQ[API Request] --> OK{Success?}
+    OK -->|Yes| DONE[Return response]
+    OK -->|401/403| FATAL[Show config error]
+    OK -->|429| WAIT[Wait Retry-After]
+    WAIT --> RETRY[Retry]
+    OK -->|5xx| RETRY
+    OK -->|Timeout| RETRY
+    RETRY --> LIMIT{Max retries?}
+    LIMIT -->|No| REQ
+    LIMIT -->|Yes| FAIL[Graceful failure]
 ```
 
+- [ ] Wrap API calls in try/except
+- [ ] Map status codes to user-facing messages
+- [ ] Log error body for debugging
+
+**📷 Image slot 4.1-A** — Screenshot of a 429 response body / headers.
+
+**📷 Image slot 4.1-B** — Decision tree diagram for error handling.
+
+**Planned files:** `utils/errors.py`, integrate into `api/request.py` and `chat/loop.py`
+
 ---
 
-## Phase 5: Tool Calling — Let the model take action
+### Step 4.2 Retry with exponential backoff
 
-> Goal: The model can call external functions, not just generate text.
-
-### Step 5.1 Function Calling basics
-
-- [ ] Define tool schemas (name, params, description)
-- [ ] Pass `tools` in the request
-- [ ] Parse `tool_calls` in the response
-- [ ] Execute local functions and append results to `messages`
-- [ ] Call the model again so it can answer using tool output
-
-**What to understand**
-
+**Pattern:**
 ```
-User: What's the weather in Beijing?
-  ↓
-Model: I need get_weather(city="Beijing")
-  ↓
-You run the function → {"temp": 25, "condition": "sunny"}
-  ↓
-Model: It's sunny in Beijing today, 25°C.
+wait 1s → retry → fail → wait 2s → retry → fail → wait 4s → ...
 ```
 
-**Planned files**
+- [ ] Configurable max retries (e.g. 3)
+- [ ] Exponential backoff + random jitter
+- [ ] Respect `Retry-After` on 429
 
-- `tools/weather.py` → example tool function
-- `tools/runner.py` → parse and execute tool calls
-- `main_tools.py` → chat entry point with tools enabled
+**📷 Image slot 4.2-A** — Graph: retry attempt vs wait time.
 
----
+**📷 Image slot 4.2-B** — Code snippet screenshot with `@with_retry` decorator.
 
-### Step 5.2 Multiple tools and tool selection
-
-- [ ] Register multiple tools
-- [ ] Let the model choose the right one
-- [ ] Handle cases where the model answers directly without calling a tool
+**Planned file:** `utils/retry.py`
 
 ---
 
-## Phase 6: RAG — Let the model read your documents
+### Step 4.3 Tokens and context window
 
-> Goal: Answer questions using private documents via retrieval-augmented generation.
+**Token** ≈ piece of text (roughly 4 chars in English, varies by language).
 
-### Step 6.1 Embeddings basics
-
-- [ ] Call the Embedding API to turn text into vectors
-- [ ] Understand that semantic similarity ≈ vector distance
-
-**Planned files**
-
-- `rag/embed.py` → text to vector
-
----
-
-### Step 6.2 Document chunking and storage
-
-- [ ] Split long documents into chunks
-- [ ] Generate embeddings for each chunk and store them
-- [ ] Simple first version: JSON file or in-memory list
-
-**Planned files**
-
-- `rag/chunk.py` → document splitting
-- `rag/store.py` → vector storage
-
----
-
-### Step 6.3 Retrieval-augmented QA
-
-- [ ] User question → query embedding
-- [ ] Find top-K most similar chunks
-- [ ] Inject retrieved chunks into the prompt, then call chat
-
-**Flow**
+**Context window** = max tokens per request (input + output combined).
 
 ```
-User question → embedding → retrieve relevant docs → build prompt → chat completion → answer
+┌─────────────────────────────────────────────┐
+│           Context window (e.g. 64K)         │
+│  ┌──────────────┐ ┌──────────────────────┐  │
+│  │ Input tokens │ │ Output tokens        │  │
+│  │ (messages)   │ │ (model generation)   │  │
+│  └──────────────┘ └──────────────────────┘  │
+└─────────────────────────────────────────────┘
 ```
 
-**Planned files**
+- [ ] Count tokens with `tiktoken` (or provider tokenizer)
+- [ ] Detect when `messages` exceed budget
+- [ ] Truncate: keep `system` + last N turns
+- [ ] Optional: summarize old turns instead of dropping
 
-- `rag/retrieve.py` → similarity search
-- `main_rag.py` → RAG QA entry point
+**Truncation strategies:**
 
----
+| Strategy | Pros | Cons |
+|----------|------|------|
+| Drop oldest turns | Simple | Loses early context |
+| Sliding window (last N turns) | Predictable | May drop important facts |
+| Summarize old turns | Keeps gist | Extra API call |
+| RAG over chat log | Searchable history | More infra |
 
-## Phase 7: Advanced — Performance and agents
+**📷 Image slot 4.3-A** — Diagram: context window filling up over long chat.
 
-> Goal: Concurrency, async I/O, and multi-step reasoning.
+**📷 Image slot 4.3-B** — Before/after truncation: 20 messages → 6 messages.
 
-### Step 7.1 Async calls
+**Planned files:** `chat/token_counter.py`, `chat/truncate.py`
 
-- [ ] Use `asyncio` + `openai.AsyncOpenAI`
-- [ ] Run multiple requests concurrently
-- [ ] Combine streaming with async
-
-**Planned files**
-
-- `api/async_request.py`
-- `main_async.py`
-
----
-
-### Step 7.2 Simple agent loop
-
-- [ ] Model → choose action → execute → observe → repeat
-- [ ] ReAct pattern: Reason + Act
-- [ ] Max step count to avoid infinite loops
-
-**Planned files**
-
-- `agent/loop.py`
-- `main_agent.py`
+**Dependency:** `pip install tiktoken`
 
 ---
 
-## Current progress
+### Step 4.4 Phase 4 deliverables
 
-| Phase | Status | Entry files |
-|-------|--------|-------------|
-| 1 Basic calls | ✅ Done | `main.py` / `main_native.py` |
-| 2 Streaming | ✅ Done | `main_stream.py` / `main_native_stream.py` |
-| 3 Multi-turn chat | ✅ Done | `main_chat.py` |
-| 4 Robustness | ⬜ | — |
-| 5 Tool calling | ⬜ | — |
-| 6 RAG | ⬜ | — |
-| 7 Advanced | ⬜ | — |
+- [ ] Chat survives a temporary 429
+- [ ] Chat survives 100+ turns without context error
+- [ ] Clear error message when API key is missing
+
+**📷 Image slot 4.4-A** — Demo: intentionally bad key → friendly error.
 
 ---
 
-## Learning principles
+## Phase 5: Tool Calling — Model meets the outside world
 
-1. **Leave runnable code at every phase** — don't just read docs
-2. **Implement SDK and native HTTP in pairs** — know what the SDK hides
-3. **Make it work first, optimize later** — retries and truncation can come after
-4. **One phase, one commit** — easier to review and rewind
+> **Goal:** Model outputs structured "call this function" instead of only text.
+> **Agent relevance:** Tools are the **hands** of an agent. No tools = no actions.
+
+**Status:** ⬜ Not started
+
+---
+
+### Step 5.1 What is a tool?
+
+A **tool** = function schema you describe to the model + function you implement in code.
+
+```json
+{
+  "type": "function",
+  "function": {
+    "name": "get_weather",
+    "description": "Get current weather for a city",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "city": {"type": "string", "description": "City name"}
+      },
+      "required": ["city"]
+    }
+  }
+}
+```
+
+**📷 Image slot 5.1-A** — Tool schema annotated: name, description, parameters.
+
+**📷 Image slot 5.1-B** — Analogy diagram: model = brain, tools = hands, your runner = nervous system.
+
+---
+
+### Step 5.2 Tool calling flow (single tool)
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant App
+    participant Model as LLM
+    participant Fn as get_weather()
+
+    User->>App: Weather in Beijing?
+    App->>Model: messages + tools schema
+    Model-->>App: tool_call: get_weather(city=Beijing)
+    App->>Fn: execute(city="Beijing")
+    Fn-->>App: {"temp": 25, "condition": "sunny"}
+    App->>App: append tool result to messages
+    App->>Model: messages (with tool output)
+    Model-->>App: natural language answer
+    App-->>User: It's sunny, 25°C in Beijing
+```
+
+**New message types:**
+```json
+{"role": "assistant", "tool_calls": [{"id": "call_abc", "function": {"name": "get_weather", "arguments": "{\"city\":\"Beijing\"}"}}]}
+{"role": "tool", "tool_call_id": "call_abc", "content": "{\"temp\": 25, \"condition\": \"sunny\"}"}
+```
+
+- [ ] Define tool schema in Python
+- [ ] Pass `tools=[...]` in API request
+- [ ] Detect `finish_reason == "tool_calls"`
+- [ ] Parse `tool_calls[0].function.name` and `.arguments`
+- [ ] Execute local function
+- [ ] Append `tool` message with result
+- [ ] Call model again for final answer
+
+**📷 Image slot 5.2-A** — Full message list after tool round-trip (4+ messages).
+
+**📷 Image slot 5.2-B** — Sequence diagram screenshot (your draw.io / Excalidraw).
+
+**Planned files:** `tools/schema.py`, `tools/weather.py`, `tools/runner.py`, `main_tools.py`
+
+---
+
+### Step 5.3 Multiple tools — model chooses
+
+- [ ] Register `get_weather`, `calculator`, `search_web`
+- [ ] Model picks based on description quality
+- [ ] Handle direct text answer (no tool needed)
+
+**📷 Image slot 5.3-A** — Routing diagram: user question → which tool?
+
+**Tip:** Tool **descriptions** are prompt engineering. Vague descriptions → wrong tool choice.
+
+---
+
+### Step 5.4 Tool calling vs traditional code
+
+| Traditional | Tool calling |
+|-------------|--------------|
+| `if "weather" in input: get_weather()` | Model decides when to call |
+| Fixed routing rules | Flexible natural language |
+| Brittle keyword matching | Handles paraphrasing |
+
+**📷 Image slot 5.4-A** — Comparison table in your notes.
+
+---
+
+### Step 5.5 Phase 5 checklist
+
+- [ ] Can you trace a tool call through the full `messages` array?
+- [ ] Why is a second API call needed after tool execution?
+- [ ] What happens if your function throws an exception?
+
+---
+
+## Phase 6: RAG — Retrieval-Augmented Generation
+
+> **Goal:** Answer from **your documents**, not just training data.
+> **Agent relevance:** RAG is how agents read manuals, codebases, and KB articles.
+
+**Status:** ⬜ Not started
+
+---
+
+### Step 6.1 The knowledge problem
+
+**Without RAG:**
+- Model only knows training cutoff data
+- Cannot read your PDFs / wiki / private DB
+
+**With RAG:**
+- Retrieve relevant chunks at query time
+- Inject chunks into prompt → model answers with context
+
+**📷 Image slot 6.1-A** — Meme-style diagram: "Model without RAG" vs "Model with RAG reading docs".
+
+---
+
+### Step 6.2 Embeddings — text to vectors
+
+**Embedding** = dense numeric vector representing meaning.
+
+```
+"dog"  → [0.12, -0.34, 0.56, ...]   # 1536 dims example
+"puppy"→ [0.11, -0.31, 0.58, ...]   # close in space
+"car"  → [-0.45, 0.22, -0.19, ...]  # far away
+```
+
+Similar meaning → small distance (cosine / L2).
+
+- [ ] Call embedding API
+- [ ] Store `(chunk_text, vector)` pairs
+- [ ] Visualize 2D projection (optional, for intuition)
+
+**📷 Image slot 6.2-A** — 2D scatter plot: dog/puppy close, car far (from notebook or screenshot).
+
+**📷 Image slot 6.2-B** — Embedding API request/response JSON.
+
+**Planned file:** `rag/embed.py`
+
+---
+
+### Step 6.3 Chunking — split documents
+
+Long docs don't fit in context. Split into chunks:
+
+```
+Document (5000 words)
+  → Chunk 1 (500 tokens)
+  → Chunk 2 (500 tokens)
+  → ...
+```
+
+| Parameter | Tradeoff |
+|-----------|----------|
+| Chunk size | Larger = more context, fewer chunks |
+| Overlap | Reduces boundary cutting mid-sentence |
+| Splitter | By paragraph vs fixed token window |
+
+- [ ] Load raw text / markdown
+- [ ] Split with overlap
+- [ ] Attach metadata (source file, page)
+
+**📷 Image slot 6.3-A** — Document with chunk boundaries highlighted.
+
+**Planned file:** `rag/chunk.py`
+
+---
+
+### Step 6.4 Vector store — remember embeddings
+
+Simple → advanced:
+
+| Store | Complexity | Use when |
+|-------|------------|----------|
+| JSON file | Low | Learning / prototype |
+| SQLite + numpy | Medium | Small datasets |
+| Chroma / FAISS | Medium | Local apps |
+| Pinecone / Weaviate | High | Production scale |
+
+- [ ] Embed all chunks
+- [ ] Save to store with IDs
+- [ ] Load store on startup
+
+**📷 Image slot 6.4-A** — Vector store schema diagram (id, text, vector, metadata).
+
+**Planned file:** `rag/store.py`
+
+---
+
+### Step 6.5 Retrieval — find relevant chunks
+
+```mermaid
+graph LR
+    Q[User question] --> EQ[Embed question]
+    EQ --> VS[Vector store]
+    VS --> TOP[Top-K similar chunks]
+    TOP --> PROMPT[Build prompt with context]
+    PROMPT --> LLM[Chat completion]
+    LLM --> A[Answer]
+```
+
+**Similarity:** cosine similarity between query vector and chunk vectors.
+
+- [ ] Embed user query
+- [ ] Compute similarity vs all chunks
+- [ ] Take top-K (e.g. K=3)
+- [ ] Build prompt:
+
+```
+Use the following context to answer:
+
+[Chunk 1 text]
+[Chunk 2 text]
+
+Question: {user_question}
+```
+
+**📷 Image slot 6.5-A** — Top-K retrieval diagram with scores (0.89, 0.85, 0.72).
+
+**📷 Image slot 6.5-B** — Final prompt with injected context (screenshot).
+
+**Planned files:** `rag/retrieve.py`, `main_rag.py`
+
+---
+
+### Step 6.6 RAG failure modes (important)
+
+| Problem | Symptom | Mitigation |
+|---------|---------|------------|
+| Bad chunks | Wrong context retrieved | Better splitting / overlap |
+| Missing info | "I don't know" | Expand corpus |
+| Hallucination | Answer not in chunks | Cite sources, lower temperature |
+| Stale data | Old info | Re-index pipeline |
+
+**📷 Image slot 6.6-A** — Your notes on a RAG failure you observed.
+
+---
+
+## Phase 7: Agents — Orchestration and autonomy
+
+> **Goal:** Multi-step reasoning: plan → act → observe → repeat.
+> **This is where Phases 3–6 compose into one system.**
+
+**Status:** ⬜ Not started
+
+---
+
+### Step 7.1 What is an Agent?
+
+**Simple chat:** 1 user message → 1 model call → 1 reply
+
+**Agent:**
+```
+goal → think → (optional) call tool → observe result → think again → ... → final answer
+```
+
+```mermaid
+graph TD
+    START[User goal] --> THINK[LLM: plan next step]
+    THINK --> DECIDE{Action?}
+    DECIDE -->|Tool| ACT[Execute tool]
+    DECIDE -->|Done| ANSWER[Return to user]
+    ACT --> OBS[Observe result]
+    OBS --> THINK
+```
+
+**📷 Image slot 7.1-A** — Agent loop diagram (classic ReAct: Reason + Act).
+
+**📷 Image slot 7.1-B** — Real product screenshot: Cursor / ChatGPT with tools enabled.
+
+---
+
+### Step 7.2 Agent = Chat + Tools + Loop + Guardrails
+
+| Component | From phase | Role in agent |
+|-----------|------------|---------------|
+| `messages[]` | Phase 3 | Short-term memory |
+| Streaming | Phase 2 | UX for long runs |
+| Retry / truncate | Phase 4 | Stability |
+| Tool calling | Phase 5 | Actions |
+| RAG | Phase 6 | Knowledge |
+
+**📷 Image slot 7.2-A** — Composition diagram: building blocks stacking into "Agent".
+
+---
+
+### Step 7.3 ReAct pattern (Reason + Act)
+
+**Example trace:**
+```
+Thought: User wants weather in Beijing. I should call get_weather.
+Action: get_weather(city="Beijing")
+Observation: {"temp": 25, "condition": "sunny"}
+Thought: I have enough info to answer.
+Answer: It's sunny in Beijing, 25°C.
+```
+
+- [ ] System prompt instructs think → act → observe format
+- [ ] Parse model output for action decisions
+- [ ] Or use native `tool_calls` (modern approach)
+
+**📷 Image slot 7.3-A** — ReAct trace in terminal log.
+
+**Planned file:** `agent/prompts.py`
+
+---
+
+### Step 7.4 Agent loop implementation
+
+```python
+MAX_STEPS = 10
+for step in range(MAX_STEPS):
+    response = call_llm(messages, tools=tools)
+    if response.has_tool_calls:
+        result = run_tools(response.tool_calls)
+        messages.append(tool_results)
+        continue
+    else:
+        return response.content  # done
+raise MaxStepsExceeded()
+```
+
+- [ ] Step limit (prevent infinite loops)
+- [ ] Timeout per run
+- [ ] Log each step for debugging
+
+**📷 Image slot 7.4-A** — Flowchart of agent loop with MAX_STEPS exit.
+
+**Planned files:** `agent/loop.py`, `main_agent.py`
+
+---
+
+### Step 7.5 Agent memory types (ecosystem view)
+
+| Memory | Duration | Implementation |
+|--------|----------|----------------|
+| Working | Current run | `messages[]` |
+| Session | Until cleared | `ChatSession` / Redis |
+| Long-term | Cross-session | Vector DB + RAG |
+| Episodic | Past agent runs | Log + retrieval |
+
+**📷 Image slot 7.5-A** — Memory pyramid diagram.
+
+---
+
+### Step 7.6 Multi-agent (preview — beyond this repo)
+
+Not required for llm-forge v1, but know the landscape:
+
+| Pattern | Description |
+|---------|-------------|
+| Router | One agent delegates to specialists |
+| Pipeline | Agent A → Agent B → Agent C |
+| Debate | Agents critique each other |
+
+**📷 Image slot 7.6-A** — Multi-agent architecture from a blog or paper screenshot.
+
+---
+
+## Phase 8: Async and scale (optional advanced)
+
+> **Goal:** Concurrent requests for throughput.
+> **Agent relevance:** Parallel tool calls, batch embedding for RAG index.
+
+**Status:** ⬜ Not started
+
+---
+
+### Step 8.1 Sync vs async
+
+| Sync | Async |
+|------|-------|
+| One call blocks until done | Many calls in flight |
+| Simple mental model | Needs `asyncio` |
+| Fine for CLI chat | Better for servers |
+
+- [ ] `AsyncOpenAI` client
+- [ ] `asyncio.gather()` for parallel calls
+- [ ] Async streaming
+
+**📷 Image slot 8.1-A** — Timeline: 3 sequential calls vs 3 parallel calls.
+
+**Planned files:** `api/async_request.py`, `main_async.py`
+
+---
+
+## Appendix A: Image index (for your notebook)
+
+Use this checklist to track which visuals you've created:
+
+| Slot ID | Topic | Done |
+|---------|-------|------|
+| 0.1-A | Layered architecture | ⬜ |
+| 0.1-B | Provider docs screenshot | ⬜ |
+| 0.2-A | Request lifecycle sequence | ⬜ |
+| 0.2-B | Request JSON | ⬜ |
+| 0.2-C | Response JSON | ⬜ |
+| 0.3-A | Capability ladder | ⬜ |
+| 0.4-A | Message roles table | ⬜ |
+| 0.4-B | Messages growth over turns | ⬜ |
+| 0.5-A | Repo folder tree | ⬜ |
+| 1.1-A | Module diagram | ⬜ |
+| 1.3-A | Raw HTTP in REST client | ⬜ |
+| 2.1-A | Stream vs non-stream terminal | ⬜ |
+| 2.3-A | Raw SSE output | ⬜ |
+| 3.1-A | Messages array growth | ⬜ |
+| 3.3-A | Multi-turn terminal demo | ⬜ |
+| 4.3-A | Context window filling | ⬜ |
+| 5.2-A | Tool call message list | ⬜ |
+| 6.2-A | Embedding similarity plot | ⬜ |
+| 6.5-A | RAG retrieval top-K | ⬜ |
+| 7.1-A | Agent loop diagram | ⬜ |
+| 7.2-A | Agent composition stack | ⬜ |
+
+---
+
+## Appendix B: Glossary
+
+| Term | One-line definition |
+|------|---------------------|
+| **LLM** | Large language model; predicts next tokens |
+| **Token** | Text unit the model reads/writes |
+| **Prompt** | Input you send (often `messages`) |
+| **Completion** | Model-generated output |
+| **Context window** | Max tokens per request |
+| **Streaming** | Incremental output delivery |
+| **SSE** | Server-Sent Events HTTP format |
+| **Tool / Function calling** | Model requests external function execution |
+| **Embedding** | Numeric vector representing text meaning |
+| **RAG** | Retrieve docs → inject into prompt → generate |
+| **Agent** | LLM loop that plans and uses tools autonomously |
+| **ReAct** | Reason + Act agent pattern |
+
+**📷 Image slot B-A** — Your personal glossary flashcards.
+
+---
+
+## Appendix C: Current progress
+
+| Phase | Status | Entry files | Image slots to fill |
+|-------|--------|-------------|---------------------|
+| 0 Big picture | 📖 Study | — | 0.1 – 0.5 |
+| 1 Basic calls | ✅ Done | `main.py`, `main_native.py` | 1.1 – 1.4 |
+| 2 Streaming | ✅ Done | `main_stream.py`, `main_native_stream.py` | 2.1 – 2.4 |
+| 3 Multi-turn chat | ✅ Done | `main_chat.py` | 3.1 – 3.5 |
+| 4 Robustness | ⬜ Next | — | 4.1 – 4.4 |
+| 5 Tool calling | ⬜ | — | 5.1 – 5.5 |
+| 6 RAG | ⬜ | — | 6.1 – 6.6 |
+| 7 Agents | ⬜ | — | 7.1 – 7.6 |
+| 8 Async | ⬜ Optional | — | 8.1 |
+
+---
+
+## Appendix D: Suggested folder for your images
+
+```
+llm-forge/
+└── docs/
+    └── images/
+        ├── 00-ecosystem/
+        ├── 01-basic-calls/
+        ├── 02-streaming/
+        ├── 03-multi-turn/
+        ├── 04-robustness/
+        ├── 05-tools/
+        ├── 06-rag/
+        └── 07-agents/
+```
+
+After adding an image, link it in this file:
+
+```markdown
+![Request lifecycle](./docs/images/00-ecosystem/0.2-A-lifecycle.png)
+```
 
 ---
 
 ## Next action
 
-Start **Phase 4: Robustness** — error handling, retry logic, and token truncation.
-
-```
-Say "next" when you're ready.
-```
+1. **Study Part 0** — fill image slots 0.1–0.5 while re-running `main.py` and `main_native.py`
+2. **Say "next"** — start Phase 4 implementation (errors, retry, token truncation)
