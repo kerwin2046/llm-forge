@@ -37,7 +37,8 @@ def create_chat_completion_stream(
     if not api_key:
         raise ValueError("DEEPSEEK_API_KEY is required")
 
-    payload = _build_payload(messages, stream=True, **params)
+    params = {**params, "stream": True}
+    payload = _build_payload(messages, **params)
     url = f"{base_url.rstrip('/')}{CHAT_COMPLETIONS_PATH}"
     data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(

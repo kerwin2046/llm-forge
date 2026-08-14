@@ -8,7 +8,8 @@ def create_chat_completion_stream(
     messages: list[dict[str, str]],
     **params,
 ):
-    return client.chat.completions.create(messages=messages, stream=True, **params)
+    params = {**params, "stream": True}
+    return client.chat.completions.create(messages=messages, **params)
 
 
 def iter_content(stream) -> Iterator[str]:
