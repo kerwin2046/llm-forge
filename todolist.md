@@ -90,15 +90,15 @@ sequenceDiagram
 
 ### 0.3 From Chat to Agent — capability ladder
 
-| Stage | What the system can do | Memory | External world | Your repo entry |
-|-------|------------------------|--------|----------------|-----------------|
-| 1. Basic call | Single Q&A | None | No | `main.py` |
-| 2. Streaming | Same, but UX is live | None | No | `main_stream.py` |
-| 3. Multi-turn chat | Context over turns | `messages[]` you maintain | No | `main_chat.py` |
-| 4. Robustness | Survives errors / long chats | Same + truncation | No | *(planned)* |
-| 5. Tool calling | Model triggers your code | Same | Yes (functions) | *(planned)* |
-| 6. RAG | Answers from your docs | Same + retrieved chunks | Yes (vector DB) | *(planned)* |
-| 7. Agent | Plan → act → observe loop | Same + tool results | Yes (many tools) | *(planned)* |
+| Stage              | What the system can do       | Memory                    | External world   | Your repo entry  |
+| ------------------ | ---------------------------- | ------------------------- | ---------------- | ---------------- |
+| 1. Basic call      | Single Q&A                   | None                      | No               | `main.py`        |
+| 2. Streaming       | Same, but UX is live         | None                      | No               | `main_stream.py` |
+| 3. Multi-turn chat | Context over turns           | `messages[]` you maintain | No               | `main_chat.py`   |
+| 4. Robustness      | Survives errors / long chats | Same + truncation         | No               | _(planned)_      |
+| 5. Tool calling    | Model triggers your code     | Same                      | Yes (functions)  | _(planned)_      |
+| 6. RAG             | Answers from your docs       | Same + retrieved chunks   | Yes (vector DB)  | _(planned)_      |
+| 7. Agent           | Plan → act → observe loop    | Same + tool results       | Yes (many tools) | _(planned)_      |
 
 **📷 Image slot 0.3-A** — Ladder diagram: Chat → Tools → RAG → Agent (annotate each rung).
 
@@ -110,19 +110,21 @@ Every chat-style API call revolves around this list:
 
 ```json
 [
-  {"role": "system",    "content": "You are a helpful assistant."},
-  {"role": "user",      "content": "What is 2+2?"},
-  {"role": "assistant", "content": "4"},
-  {"role": "user",      "content": "What was my previous question?"}
+  { "role": "system", "content": "You are a helpful assistant." },
+  { "role": "user", "content": "What is 2+2?" },
+  { "role": "assistant", "content": "4" },
+  { "role": "user", "content": "What was my previous question?" }
 ]
 ```
 
-| Role | Purpose | Who writes it |
-|------|---------|---------------|
-| `system` | Behavior rules, persona, constraints | Your app (once per session) |
-| `user` | Human input | User |
-| `assistant` | Model output | Model (you store it) |
-| `tool` | Function result (Phase 5+) | Your app after running a tool |
+![](./docs/images/01-basic-calls/%20core-data-structure.png)
+
+| Role        | Purpose                              | Who writes it                 |
+| ----------- | ------------------------------------ | ----------------------------- |
+| `system`    | Behavior rules, persona, constraints | Your app (once per session)   |
+| `user`      | Human input                          | User                          |
+| `assistant` | Model output                         | Model (you store it)          |
+| `tool`      | Function result (Phase 5+)           | Your app after running a tool |
 
 **📷 Image slot 0.4-A** — Table of roles with color coding (system=blue, user=green, assistant=gray).
 
@@ -166,13 +168,13 @@ llm-forge/
 
 **Why split files?** Later phases add tools, RAG, and agents. Clean boundaries prevent spaghetti.
 
-| Module | Responsibility | Analogy |
-|--------|----------------|---------|
-| `provider.py` | Who to call (URL, key) | Phone dial config |
-| `messages.py` | What to say | Script / dialogue |
-| `model.py` | Which brain + knobs | Model settings |
-| `api/request.py` | Send request | Press "send" |
-| `api/response.py` | Parse reply | Read inbox |
+| Module            | Responsibility         | Analogy           |
+| ----------------- | ---------------------- | ----------------- |
+| `provider.py`     | Who to call (URL, key) | Phone dial config |
+| `messages.py`     | What to say            | Script / dialogue |
+| `model.py`        | Which brain + knobs    | Model settings    |
+| `api/request.py`  | Send request           | Press "send"      |
+| `api/response.py` | Parse reply            | Read inbox        |
 
 - [x] Split `provider`
 - [x] Split `messages`
@@ -186,6 +188,7 @@ llm-forge/
 **Files:** `provider.py`, `messages.py`, `model.py`, `api/request.py`, `api/response.py`, `main.py`
 
 **Verify:**
+
 ```bash
 export DEEPSEEK_API_KEY=your_key
 python main.py
@@ -220,12 +223,12 @@ POST /chat/completions + Authorization + JSON body → parse response
 
 **Deep dive: OpenAI-compatible providers**
 
-| Field | DeepSeek | OpenAI |
-|-------|----------|--------|
+| Field      | DeepSeek                   | OpenAI                      |
+| ---------- | -------------------------- | --------------------------- |
 | `base_url` | `https://api.deepseek.com` | `https://api.openai.com/v1` |
-| Endpoint | `/chat/completions` | `/chat/completions` |
-| Auth | `Bearer <key>` | `Bearer <key>` |
-| Body shape | Same | Same |
+| Endpoint   | `/chat/completions`        | `/chat/completions`         |
+| Auth       | `Bearer <key>`             | `Bearer <key>`              |
+| Body shape | Same                       | Same                        |
 
 **📷 Image slot 1.2-C** — Provider comparison table (your notes).
 
@@ -236,6 +239,7 @@ POST /chat/completions + Authorization + JSON body → parse response
 **Why bother if SDK exists?** Agents, streaming, and debugging all make more sense when you've seen raw HTTP.
 
 **Request (conceptual):**
+
 ```http
 POST https://api.deepseek.com/chat/completions
 Authorization: Bearer sk-...
@@ -254,18 +258,21 @@ Content-Type: application/json
 ```
 
 **Response (conceptual):**
+
 ```json
 {
   "id": "chatcmpl-...",
   "object": "chat.completion",
-  "choices": [{
-    "index": 0,
-    "message": {
-      "role": "assistant",
-      "content": "Hello! How can I help you today?"
-    },
-    "finish_reason": "stop"
-  }],
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Hello! How can I help you today?"
+      },
+      "finish_reason": "stop"
+    }
+  ],
   "usage": {
     "prompt_tokens": 20,
     "completion_tokens": 12,
@@ -287,6 +294,7 @@ Content-Type: application/json
 **Files:** `native_http/request.py`, `native_http/response.py`, `main_native.py`
 
 **Verify:**
+
 ```bash
 python main_native.py
 ```
@@ -317,13 +325,13 @@ Before moving on, you should be able to answer:
 
 ### Step 2.1 Non-streaming vs streaming — two paradigms ✅
 
-| | Non-streaming | Streaming |
-|---|---------------|-----------|
-| `stream` param | `false` | `true` |
-| HTTP body | One JSON at end | SSE stream (`text/event-stream`) |
-| Client reads | `response.json()` once | Loop: read chunk → chunk → … |
-| UX | Wait → full text | Typewriter effect |
-| Use case | Batch, short replies | Chat UI, long generation |
+|                | Non-streaming          | Streaming                        |
+| -------------- | ---------------------- | -------------------------------- |
+| `stream` param | `false`                | `true`                           |
+| HTTP body      | One JSON at end        | SSE stream (`text/event-stream`) |
+| Client reads   | `response.json()` once | Loop: read chunk → chunk → …     |
+| UX             | Wait → full text       | Typewriter effect                |
+| Use case       | Batch, short replies   | Chat UI, long generation         |
 
 ```mermaid
 graph LR
@@ -382,6 +390,7 @@ data: [DONE]
 ```
 
 **Parsing rules:**
+
 1. Read line by line from the socket
 2. Ignore empty lines
 3. Lines starting with `data: ` contain payload
@@ -455,6 +464,7 @@ sequenceDiagram
 ### Step 3.2 Session abstraction ✅
 
 `ChatSession` encapsulates:
+
 - `system` prompt (always first)
 - `add_user()` / `add_assistant()`
 - `clear()` → reset to system-only
@@ -478,6 +488,7 @@ session.add_user("What's my name?")
 ### Step 3.3 Interactive loop + streaming reply ✅
 
 **Loop logic:**
+
 ```
 while True:
     read user input
@@ -499,6 +510,7 @@ while True:
 **Files:** `chat/session.py`, `chat/loop.py`, `main_chat.py`
 
 **Verify:**
+
 ```bash
 python main_chat.py
 ```
@@ -535,14 +547,14 @@ python main_chat.py
 
 ### Step 4.1 HTTP errors — know the failure modes
 
-| Code | Name | Cause | Your action |
-|------|------|-------|-------------|
-| 401 | Unauthorized | Bad/missing API key | Fix env, fail fast |
-| 403 | Forbidden | Key lacks permission | Check account |
-| 429 | Too Many Requests | Rate limit | Backoff + retry |
-| 500 | Internal Server Error | Provider issue | Retry with limit |
-| 503 | Service Unavailable | Overloaded | Retry + jitter |
-| Timeout | — | Network / slow model | Retry or abort |
+| Code    | Name                  | Cause                | Your action        |
+| ------- | --------------------- | -------------------- | ------------------ |
+| 401     | Unauthorized          | Bad/missing API key  | Fix env, fail fast |
+| 403     | Forbidden             | Key lacks permission | Check account      |
+| 429     | Too Many Requests     | Rate limit           | Backoff + retry    |
+| 500     | Internal Server Error | Provider issue       | Retry with limit   |
+| 503     | Service Unavailable   | Overloaded           | Retry + jitter     |
+| Timeout | —                     | Network / slow model | Retry or abort     |
 
 ```mermaid
 graph TD
@@ -573,6 +585,7 @@ graph TD
 ### Step 4.2 Retry with exponential backoff
 
 **Pattern:**
+
 ```
 wait 1s → retry → fail → wait 2s → retry → fail → wait 4s → ...
 ```
@@ -612,12 +625,12 @@ wait 1s → retry → fail → wait 2s → retry → fail → wait 4s → ...
 
 **Truncation strategies:**
 
-| Strategy | Pros | Cons |
-|----------|------|------|
-| Drop oldest turns | Simple | Loses early context |
-| Sliding window (last N turns) | Predictable | May drop important facts |
-| Summarize old turns | Keeps gist | Extra API call |
-| RAG over chat log | Searchable history | More infra |
+| Strategy                      | Pros               | Cons                     |
+| ----------------------------- | ------------------ | ------------------------ |
+| Drop oldest turns             | Simple             | Loses early context      |
+| Sliding window (last N turns) | Predictable        | May drop important facts |
+| Summarize old turns           | Keeps gist         | Extra API call           |
+| RAG over chat log             | Searchable history | More infra               |
 
 **📷 Image slot 4.3-A** — Diagram: context window filling up over long chat.
 
@@ -661,7 +674,7 @@ A **tool** = function schema you describe to the model + function you implement 
     "parameters": {
       "type": "object",
       "properties": {
-        "city": {"type": "string", "description": "City name"}
+        "city": { "type": "string", "description": "City name" }
       },
       "required": ["city"]
     }
@@ -696,6 +709,7 @@ sequenceDiagram
 ```
 
 **New message types:**
+
 ```json
 {"role": "assistant", "tool_calls": [{"id": "call_abc", "function": {"name": "get_weather", "arguments": "{\"city\":\"Beijing\"}"}}]}
 {"role": "tool", "tool_call_id": "call_abc", "content": "{\"temp\": 25, \"condition\": \"sunny\"}"}
@@ -731,11 +745,11 @@ sequenceDiagram
 
 ### Step 5.4 Tool calling vs traditional code
 
-| Traditional | Tool calling |
-|-------------|--------------|
+| Traditional                            | Tool calling               |
+| -------------------------------------- | -------------------------- |
 | `if "weather" in input: get_weather()` | Model decides when to call |
-| Fixed routing rules | Flexible natural language |
-| Brittle keyword matching | Handles paraphrasing |
+| Fixed routing rules                    | Flexible natural language  |
+| Brittle keyword matching               | Handles paraphrasing       |
 
 **📷 Image slot 5.4-A** — Comparison table in your notes.
 
@@ -761,10 +775,12 @@ sequenceDiagram
 ### Step 6.1 The knowledge problem
 
 **Without RAG:**
+
 - Model only knows training cutoff data
 - Cannot read your PDFs / wiki / private DB
 
 **With RAG:**
+
 - Retrieve relevant chunks at query time
 - Inject chunks into prompt → model answers with context
 
@@ -807,11 +823,11 @@ Document (5000 words)
   → ...
 ```
 
-| Parameter | Tradeoff |
-|-----------|----------|
-| Chunk size | Larger = more context, fewer chunks |
-| Overlap | Reduces boundary cutting mid-sentence |
-| Splitter | By paragraph vs fixed token window |
+| Parameter  | Tradeoff                              |
+| ---------- | ------------------------------------- |
+| Chunk size | Larger = more context, fewer chunks   |
+| Overlap    | Reduces boundary cutting mid-sentence |
+| Splitter   | By paragraph vs fixed token window    |
 
 - [ ] Load raw text / markdown
 - [ ] Split with overlap
@@ -827,12 +843,12 @@ Document (5000 words)
 
 Simple → advanced:
 
-| Store | Complexity | Use when |
-|-------|------------|----------|
-| JSON file | Low | Learning / prototype |
-| SQLite + numpy | Medium | Small datasets |
-| Chroma / FAISS | Medium | Local apps |
-| Pinecone / Weaviate | High | Production scale |
+| Store               | Complexity | Use when             |
+| ------------------- | ---------- | -------------------- |
+| JSON file           | Low        | Learning / prototype |
+| SQLite + numpy      | Medium     | Small datasets       |
+| Chroma / FAISS      | Medium     | Local apps           |
+| Pinecone / Weaviate | High       | Production scale     |
 
 - [ ] Embed all chunks
 - [ ] Save to store with IDs
@@ -882,12 +898,12 @@ Question: {user_question}
 
 ### Step 6.6 RAG failure modes (important)
 
-| Problem | Symptom | Mitigation |
-|---------|---------|------------|
-| Bad chunks | Wrong context retrieved | Better splitting / overlap |
-| Missing info | "I don't know" | Expand corpus |
-| Hallucination | Answer not in chunks | Cite sources, lower temperature |
-| Stale data | Old info | Re-index pipeline |
+| Problem       | Symptom                 | Mitigation                      |
+| ------------- | ----------------------- | ------------------------------- |
+| Bad chunks    | Wrong context retrieved | Better splitting / overlap      |
+| Missing info  | "I don't know"          | Expand corpus                   |
+| Hallucination | Answer not in chunks    | Cite sources, lower temperature |
+| Stale data    | Old info                | Re-index pipeline               |
 
 **📷 Image slot 6.6-A** — Your notes on a RAG failure you observed.
 
@@ -907,6 +923,7 @@ Question: {user_question}
 **Simple chat:** 1 user message → 1 model call → 1 reply
 
 **Agent:**
+
 ```
 goal → think → (optional) call tool → observe result → think again → ... → final answer
 ```
@@ -929,13 +946,13 @@ graph TD
 
 ### Step 7.2 Agent = Chat + Tools + Loop + Guardrails
 
-| Component | From phase | Role in agent |
-|-----------|------------|---------------|
-| `messages[]` | Phase 3 | Short-term memory |
-| Streaming | Phase 2 | UX for long runs |
-| Retry / truncate | Phase 4 | Stability |
-| Tool calling | Phase 5 | Actions |
-| RAG | Phase 6 | Knowledge |
+| Component        | From phase | Role in agent     |
+| ---------------- | ---------- | ----------------- |
+| `messages[]`     | Phase 3    | Short-term memory |
+| Streaming        | Phase 2    | UX for long runs  |
+| Retry / truncate | Phase 4    | Stability         |
+| Tool calling     | Phase 5    | Actions           |
+| RAG              | Phase 6    | Knowledge         |
 
 **📷 Image slot 7.2-A** — Composition diagram: building blocks stacking into "Agent".
 
@@ -944,6 +961,7 @@ graph TD
 ### Step 7.3 ReAct pattern (Reason + Act)
 
 **Example trace:**
+
 ```
 Thought: User wants weather in Beijing. I should call get_weather.
 Action: get_weather(city="Beijing")
@@ -989,12 +1007,12 @@ raise MaxStepsExceeded()
 
 ### Step 7.5 Agent memory types (ecosystem view)
 
-| Memory | Duration | Implementation |
-|--------|----------|----------------|
-| Working | Current run | `messages[]` |
-| Session | Until cleared | `ChatSession` / Redis |
-| Long-term | Cross-session | Vector DB + RAG |
-| Episodic | Past agent runs | Log + retrieval |
+| Memory    | Duration        | Implementation        |
+| --------- | --------------- | --------------------- |
+| Working   | Current run     | `messages[]`          |
+| Session   | Until cleared   | `ChatSession` / Redis |
+| Long-term | Cross-session   | Vector DB + RAG       |
+| Episodic  | Past agent runs | Log + retrieval       |
 
 **📷 Image slot 7.5-A** — Memory pyramid diagram.
 
@@ -1004,11 +1022,11 @@ raise MaxStepsExceeded()
 
 Not required for llm-forge v1, but know the landscape:
 
-| Pattern | Description |
-|---------|-------------|
-| Router | One agent delegates to specialists |
-| Pipeline | Agent A → Agent B → Agent C |
-| Debate | Agents critique each other |
+| Pattern  | Description                        |
+| -------- | ---------------------------------- |
+| Router   | One agent delegates to specialists |
+| Pipeline | Agent A → Agent B → Agent C        |
+| Debate   | Agents critique each other         |
 
 **📷 Image slot 7.6-A** — Multi-agent architecture from a blog or paper screenshot.
 
@@ -1025,11 +1043,11 @@ Not required for llm-forge v1, but know the landscape:
 
 ### Step 8.1 Sync vs async
 
-| Sync | Async |
-|------|-------|
+| Sync                       | Async                |
+| -------------------------- | -------------------- |
 | One call blocks until done | Many calls in flight |
-| Simple mental model | Needs `asyncio` |
-| Fine for CLI chat | Better for servers |
+| Simple mental model        | Needs `asyncio`      |
+| Fine for CLI chat          | Better for servers   |
 
 - [ ] `AsyncOpenAI` client
 - [ ] `asyncio.gather()` for parallel calls
@@ -1045,48 +1063,48 @@ Not required for llm-forge v1, but know the landscape:
 
 Use this checklist to track which visuals you've created:
 
-| Slot ID | Topic | Done |
-|---------|-------|------|
-| 0.1-A | Layered architecture | ⬜ |
-| 0.1-B | Provider docs screenshot | ⬜ |
-| 0.2-A | Request lifecycle sequence | ⬜ |
-| 0.2-B | Request JSON | ⬜ |
-| 0.2-C | Response JSON | ⬜ |
-| 0.3-A | Capability ladder | ⬜ |
-| 0.4-A | Message roles table | ⬜ |
-| 0.4-B | Messages growth over turns | ⬜ |
-| 0.5-A | Repo folder tree | ⬜ |
-| 1.1-A | Module diagram | ⬜ |
-| 1.3-A | Raw HTTP in REST client | ⬜ |
-| 2.1-A | Stream vs non-stream terminal | ⬜ |
-| 2.3-A | Raw SSE output | ⬜ |
-| 3.1-A | Messages array growth | ⬜ |
-| 3.3-A | Multi-turn terminal demo | ⬜ |
-| 4.3-A | Context window filling | ⬜ |
-| 5.2-A | Tool call message list | ⬜ |
-| 6.2-A | Embedding similarity plot | ⬜ |
-| 6.5-A | RAG retrieval top-K | ⬜ |
-| 7.1-A | Agent loop diagram | ⬜ |
-| 7.2-A | Agent composition stack | ⬜ |
+| Slot ID | Topic                         | Done |
+| ------- | ----------------------------- | ---- |
+| 0.1-A   | Layered architecture          | ⬜   |
+| 0.1-B   | Provider docs screenshot      | ⬜   |
+| 0.2-A   | Request lifecycle sequence    | ⬜   |
+| 0.2-B   | Request JSON                  | ⬜   |
+| 0.2-C   | Response JSON                 | ⬜   |
+| 0.3-A   | Capability ladder             | ⬜   |
+| 0.4-A   | Message roles table           | ⬜   |
+| 0.4-B   | Messages growth over turns    | ⬜   |
+| 0.5-A   | Repo folder tree              | ⬜   |
+| 1.1-A   | Module diagram                | ⬜   |
+| 1.3-A   | Raw HTTP in REST client       | ⬜   |
+| 2.1-A   | Stream vs non-stream terminal | ⬜   |
+| 2.3-A   | Raw SSE output                | ⬜   |
+| 3.1-A   | Messages array growth         | ⬜   |
+| 3.3-A   | Multi-turn terminal demo      | ⬜   |
+| 4.3-A   | Context window filling        | ⬜   |
+| 5.2-A   | Tool call message list        | ⬜   |
+| 6.2-A   | Embedding similarity plot     | ⬜   |
+| 6.5-A   | RAG retrieval top-K           | ⬜   |
+| 7.1-A   | Agent loop diagram            | ⬜   |
+| 7.2-A   | Agent composition stack       | ⬜   |
 
 ---
 
 ## Appendix B: Glossary
 
-| Term | One-line definition |
-|------|---------------------|
-| **LLM** | Large language model; predicts next tokens |
-| **Token** | Text unit the model reads/writes |
-| **Prompt** | Input you send (often `messages`) |
-| **Completion** | Model-generated output |
-| **Context window** | Max tokens per request |
-| **Streaming** | Incremental output delivery |
-| **SSE** | Server-Sent Events HTTP format |
-| **Tool / Function calling** | Model requests external function execution |
-| **Embedding** | Numeric vector representing text meaning |
-| **RAG** | Retrieve docs → inject into prompt → generate |
-| **Agent** | LLM loop that plans and uses tools autonomously |
-| **ReAct** | Reason + Act agent pattern |
+| Term                        | One-line definition                             |
+| --------------------------- | ----------------------------------------------- |
+| **LLM**                     | Large language model; predicts next tokens      |
+| **Token**                   | Text unit the model reads/writes                |
+| **Prompt**                  | Input you send (often `messages`)               |
+| **Completion**              | Model-generated output                          |
+| **Context window**          | Max tokens per request                          |
+| **Streaming**               | Incremental output delivery                     |
+| **SSE**                     | Server-Sent Events HTTP format                  |
+| **Tool / Function calling** | Model requests external function execution      |
+| **Embedding**               | Numeric vector representing text meaning        |
+| **RAG**                     | Retrieve docs → inject into prompt → generate   |
+| **Agent**                   | LLM loop that plans and uses tools autonomously |
+| **ReAct**                   | Reason + Act agent pattern                      |
 
 **📷 Image slot B-A** — Your personal glossary flashcards.
 
@@ -1094,17 +1112,17 @@ Use this checklist to track which visuals you've created:
 
 ## Appendix C: Current progress
 
-| Phase | Status | Entry files | Image slots to fill |
-|-------|--------|-------------|---------------------|
-| 0 Big picture | 📖 Study | — | 0.1 – 0.5 |
-| 1 Basic calls | ✅ Done | `main.py`, `main_native.py` | 1.1 – 1.4 |
-| 2 Streaming | ✅ Done | `main_stream.py`, `main_native_stream.py` | 2.1 – 2.4 |
-| 3 Multi-turn chat | ✅ Done | `main_chat.py` | 3.1 – 3.5 |
-| 4 Robustness | ⬜ Next | — | 4.1 – 4.4 |
-| 5 Tool calling | ⬜ | — | 5.1 – 5.5 |
-| 6 RAG | ⬜ | — | 6.1 – 6.6 |
-| 7 Agents | ⬜ | — | 7.1 – 7.6 |
-| 8 Async | ⬜ Optional | — | 8.1 |
+| Phase             | Status      | Entry files                               | Image slots to fill |
+| ----------------- | ----------- | ----------------------------------------- | ------------------- |
+| 0 Big picture     | 📖 Study    | —                                         | 0.1 – 0.5           |
+| 1 Basic calls     | ✅ Done     | `main.py`, `main_native.py`               | 1.1 – 1.4           |
+| 2 Streaming       | ✅ Done     | `main_stream.py`, `main_native_stream.py` | 2.1 – 2.4           |
+| 3 Multi-turn chat | ✅ Done     | `main_chat.py`                            | 3.1 – 3.5           |
+| 4 Robustness      | ⬜ Next     | —                                         | 4.1 – 4.4           |
+| 5 Tool calling    | ⬜          | —                                         | 5.1 – 5.5           |
+| 6 RAG             | ⬜          | —                                         | 6.1 – 6.6           |
+| 7 Agents          | ⬜          | —                                         | 7.1 – 7.6           |
+| 8 Async           | ⬜ Optional | —                                         | 8.1                 |
 
 ---
 
