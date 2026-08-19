@@ -2,11 +2,11 @@ from api.request import create_chat_completion
 from api.response import print_response
 from messages import default_messages
 from model import chat_params
-from provider import get_client
+from provider import custom_client
 
 
 def main() -> None:
-    client = get_client()
+    client = custom_client()
     messages = default_messages()
     params = chat_params()
     response = create_chat_completion(client, messages, **params)

@@ -1,11 +1,11 @@
 from api.stream import create_chat_completion_stream, print_stream
 from messages import default_messages
 from model import chat_params
-from provider import get_client
+from provider import custom_client
 
 
 def main() -> None:
-    client = get_client()
+    client = custom_client()
     messages = default_messages()
     params = chat_params(stream=True)
     stream = create_chat_completion_stream(client, messages, **params)

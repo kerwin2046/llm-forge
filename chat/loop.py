@@ -15,15 +15,15 @@ def _read_user_input() -> str | None:
 
 def _stream_reply(client: OpenAI, session: ChatSession, params: dict) -> str:
     stream = create_chat_completion_stream(client, session.messages, **params)
-    print("Assistant: ", end="", flush=True)
+    print("🥰:", end="", flush=True)
 
-    parts: list[str] = []
-    for text in iter_content(stream):
-        print(text, end="", flush=True)
-        parts.append(text)
-    print()
+    parts: list[str] = [] # to store the parts of the reply
+    for text in iter_content(stream): # iterate over the stream
+        print(text, end="", flush=True) # print the text
+        parts.append(text) # add the text to the parts
+    print() # print a new line
 
-    return "".join(parts)
+    return "".join(parts) # join the parts and return the reply
 
 
 def run_chat_loop(client: OpenAI, session: ChatSession, params: dict) -> None:

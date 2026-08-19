@@ -12,6 +12,10 @@ Use this doc as a notebook: each `📷 Image slot` is a place to paste a screens
 
 ### 0.1 Layered architecture
 
+The point of this diagram is not “how many boxes exist”. It is a **control boundary**: you write the application; the model is a black box; they meet over HTTP.
+
+![](docs/images/00-ecosystem/llm-web-control.png)
+
 ```mermaid
 graph TB
     subgraph UserLayer["User Layer"]
@@ -53,13 +57,52 @@ graph TB
     DS --> LLM
 ```
 
-**📷 Image slot 0.1-A** — Your own version of this stack diagram (label what you control vs what is external).
+
+
+**User layer.** A human types and reads. Today that is the terminal (`input("You: ")` in `chat/loop.py`). A web UI later should not force you to rewrite the layers below.
+
+**Application layer — what this repo actually builds.** The four boxes are a **capability ladder**, not four side-by-side products:
+
+
+| Box                | Now                            | Later                                                |
+| ------------------ | ------------------------------ | ---------------------------------------------------- |
+| Chat loop          | `chat/loop.py` + `ChatSession` | truncation, retries                                  |
+| Tool runner        | not yet                        | model says “call this function”; your code runs it   |
+| RAG pipeline       | not yet                        | retrieve doc chunks, then stuff them into `messages` |
+| Agent orchestrator | not yet                        | Chat + Tools + RAG in a plan → act → observe loop    |
+
+
+An agent is **not** a different API. It is an application-layer scheduler that repeatedly calls the same chat-completion endpoint.
+
+**API layer — two paths for the same protocol.** The OpenAI SDK only serializes JSON, sends HTTP, and parses the response. This repo already has both paths:
+
+- SDK: `api/request.py`, `api/stream.py`
+- Raw HTTP: `native_http/`
+
+`api/request.py` is conceptually one line: `client.chat.completions.create(...)`. Underneath it is still `POST /chat/completions`. Switching providers is usually `base_url` + `api_key`, not a new protocol.
+
+**Provider vs model.** `provider.py` chooses **who** you call (URL + key: DeepSeek or Agnes). `model.py` chooses **which brain and knobs** (`agnes-2.0-flash`, `reasoning_effort`, thinking). Tokenize → forward pass → sampling all happen on the provider’s machines. You only see JSON in and JSON out. That is why the bottom layer is labeled **black box**.
+
+**📷 Image slot 0.1-A** — Your own version of this stack diagram (label what you control vs what is external: `provider.py` / `model.py` / `api/` vs the hosted weights).
 
 **📷 Image slot 0.1-B** — Screenshot of DeepSeek docs homepage / API reference (anchor: "this is the provider").
 
 ---
 
+
+
 ### 0.2 One request lifecycle (non-streaming)
+
+Entry point: `main.py` — one question, wait for the full answer, print, exit.
+
+```python
+def main() -> None:
+    client = custom_client()
+    messages = default_messages()
+    params = chat_params()
+    response = create_chat_completion(client, messages, **params)
+    print_response(response)
+```
 
 ```mermaid
 sequenceDiagram
@@ -78,7 +121,46 @@ sequenceDiagram
     App->>App: extract choices[0].message.content
 ```
 
-**Key insight:** The model is **stateless**. Your app must resend history every time.
+
+
+Walk the same call:
+
+1. **Assemble three objects**
+  - `client` — which host, which key (`provider.py`)
+  - `messages` — what was said (`messages.py` / `ChatSession`)
+  - `params` — which model, stream or not, thinking (`model.py`)
+2. **SDK serializes** to JSON, e.g.
+  ```json
+   {
+     "model": "agnes-2.0-flash",
+     "stream": false,
+     "messages": [
+       {"role": "system", "content": "You are a helpful assistant"},
+       {"role": "user", "content": "hello,Good Day!"}
+     ]
+   }
+  ```
+3. **HTTP** — `POST {base_url}/chat/completions` with `Authorization: Bearer ...`
+4. **Provider (black box)** — tokenize → forward pass → sample tokens → join into a reply
+5. **Response JSON** — the field you actually need:
+  ```json
+   {
+     "choices": [
+       {
+         "message": {
+           "role": "assistant",
+           "content": "Hello! How can I help you today?"
+         }
+       }
+     ]
+   }
+  ```
+   `api/response.py` reads `choices[0].message.content`.
+6. **App prints** — `print_response` dumps the text (and currently the whole `ChatCompletion` object, useful for matching this diagram).
+
+Streaming (`main_stream.py`) shares steps 1–3. The difference is delivery: the server pushes `delta.content` over SSE; `iter_content` yields each slice; the terminal prints as tokens arrive. For the model it is still **one** completion.
+
+**Key insight:** The model is **stateless**. The API does not remember the previous turn. Every call must resend the full `messages` list. Multi-turn chat is not “the model remembering you”; it is **your app accumulating history locally and resending it**. Kill the process or call `session.clear()` and the model has no past.
 
 **📷 Image slot 0.2-A** — Sequence diagram (draw or export from Mermaid).
 
@@ -88,25 +170,56 @@ sequenceDiagram
 
 ---
 
+
+
 ### 0.3 From Chat to Agent — capability ladder
+
+Every rung still calls `chat.completions.create`. What changes is **what your app does before and after that call**.
+
 
 | Stage              | What the system can do       | Memory                    | External world   | Your repo entry  |
 | ------------------ | ---------------------------- | ------------------------- | ---------------- | ---------------- |
 | 1. Basic call      | Single Q&A                   | None                      | No               | `main.py`        |
 | 2. Streaming       | Same, but UX is live         | None                      | No               | `main_stream.py` |
 | 3. Multi-turn chat | Context over turns           | `messages[]` you maintain | No               | `main_chat.py`   |
-| 4. Robustness      | Survives errors / long chats | Same + truncation         | No               | _(planned)_      |
-| 5. Tool calling    | Model triggers your code     | Same                      | Yes (functions)  | _(planned)_      |
-| 6. RAG             | Answers from your docs       | Same + retrieved chunks   | Yes (vector DB)  | _(planned)_      |
-| 7. Agent           | Plan → act → observe loop    | Same + tool results       | Yes (many tools) | _(planned)_      |
+| 4. Robustness      | Survives errors / long chats | Same + truncation         | No               | *(planned)*      |
+| 5. Tool calling    | Model triggers your code     | Same                      | Yes (functions)  | *(planned)*      |
+| 6. RAG             | Answers from your docs       | Same + retrieved chunks   | Yes (vector DB)  | *(planned)*      |
+| 7. Agent           | Plan → act → observe loop    | Same + tool results       | Yes (many tools) | *(planned)*      |
+
+
+**Rungs 1–3 (already in this repo):**
+
+- **1** — send two fixed messages, get one complete string, exit.
+- **2** — same request with `stream=True`. Same completion, different UX.
+- **3** — a loop that `add_user` / `add_assistant` and resends the **entire** history each turn.
+
+That is the core of `chat/loop.py`:
+
+```python
+session.add_user(user_input)
+reply = _stream_reply(client, session, params)
+session.add_assistant(reply)
+```
+
+**Rungs 4–7 (what each one actually adds):**
+
+- **4 Robustness** — networks fail; context windows overflow. Retry, timeout, truncate old turns by token count. Same memory shape, harder to kill.
+- **5 Tool calling** — the model may return `tool_calls` instead of a final answer. You run the function, append `role: tool`, call the model again. First time the system can touch the real world.
+- **6 RAG** — retrieve document chunks first, insert them into this turn’s `messages` (often as extra user/system text). The model still has no long-term memory; it just **sees more on this call**.
+- **7 Agent** — not a new endpoint. An orchestrator loop: decide next step → call a tool or retrieve → observe → call the model again until it should stop. Chat, tools, and RAG are parts, not replacements.
+
+When you draw Image slot 0.3-A, annotate **what each rung adds** (live tokens, history list, truncation, functions, retrieval, a scheduler). Do not draw four unrelated products.
 
 **📷 Image slot 0.3-A** — Ladder diagram: Chat → Tools → RAG → Agent (annotate each rung).
 
 ---
 
+
+
 ### 0.4 Core data structure: `messages`
 
-Every chat-style API call revolves around this list:
+Every chat-style API call revolves around this list. The `role` values are part of the **protocol**, not Python syntax.
 
 ```json
 [
@@ -117,7 +230,8 @@ Every chat-style API call revolves around this list:
 ]
 ```
 
-![](./docs/images/01-basic-calls/%20core-data-structure.png)
+
+
 
 | Role        | Purpose                              | Who writes it                 |
 | ----------- | ------------------------------------ | ----------------------------- |
@@ -126,34 +240,89 @@ Every chat-style API call revolves around this list:
 | `assistant` | Model output                         | Model (you store it)          |
 | `tool`      | Function result (Phase 5+)           | Your app after running a tool |
 
+
+**One-shot** (`messages.py`) is system + current user only — no history:
+
+```python
+def default_messages(user_content: str = "hello,Good Day!") -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": "You are a helpful assistant"},
+        {"role": "user", "content": user_content},
+    ]
+```
+
+**Multi-turn** (`ChatSession`) turns that list into session state: start with system, `add_user` / `add_assistant` each turn, `clear()` keeps only system.
+
+How the array grows over three turns (Image slot 0.4-B):
+
+```
+Turn 1 send:  [system, user1]
+Turn 1 store: [system, user1, assistant1]
+
+Turn 2 send:  [system, user1, assistant1, user2]
+Turn 2 store: [system, user1, assistant1, user2, assistant2]
+
+Turn 3 send:  [system, user1, assistant1, user2, assistant2, user3]
+```
+
+If you forget `add_assistant` after turn 1, turn 2 the model cannot see what it just said — pronouns and follow-ups break. `/clear` is a new session, not a different model.
+
+Later phases still use this array: RAG **inserts retrieved text** into this turn; tools append `assistant.tool_calls` plus `role: tool`. Same structure, more item kinds.
+
 **📷 Image slot 0.4-A** — Table of roles with color coding (system=blue, user=green, assistant=gray).
 
 **📷 Image slot 0.4-B** — Annotated `messages` array growing over 3 turns (Turn 1 → Turn 2 → Turn 3).
 
 ---
 
+
+
 ### 0.5 Repo map (current + planned)
+
+The tree grows with the ladder. Files are split by concern so later phases do not tangle into one script.
 
 ```
 llm-forge/
-├── provider.py          # API client config
-├── messages.py          # Default message builders
-├── model.py             # Model name + params
+├── provider.py          # Who to call (URL + key)           ← provider layer config
+├── messages.py          # Default messages list             ← 0.4 one-shot version
+├── model.py             # Model name + sampling / thinking  ← knobs
 ├── api/                 # SDK path
-│   ├── request.py       # Non-streaming
-│   ├── response.py
-│   └── stream.py        # Streaming
-├── native_http/         # Raw HTTP path (same logic, no SDK)
-├── chat/                # Multi-turn session (Phase 3)
-├── utils/               # Retry, errors (Phase 4) — planned
-├── tools/               # Function calling (Phase 5) — planned
-├── rag/                 # Embeddings + retrieval (Phase 6) — planned
-└── agent/               # Agent loop (Phase 7) — planned
+│   ├── request.py       # Non-streaming Phase 1
+│   ├── response.py      # Extract content
+│   └── stream.py        # Streaming Phase 2
+├── native_http/         # Same protocol, no SDK
+├── chat/                # Multi-turn Phase 3
+│   ├── session.py       # Owns messages[]
+│   └── loop.py          # Read input → call API → append history
+├── utils/               # Retry / truncation Phase 4 — planned
+├── tools/               # Function calling Phase 5 — planned
+├── rag/                 # Embeddings + retrieval Phase 6 — planned
+└── agent/               # Orchestrator loop Phase 7 — planned
 ```
+
+Three entry points map to rungs 1–3:
+
+- `main.py` — one full response
+- `main_stream.py` — one streamed response
+- `main_chat.py` — session loop (uses streaming internally)
+
+`main_native.py` / `main_native_stream.py` prove the same lifecycle without the SDK.
+
+**One line through the whole picture:**
+
+1. User speaks → append `{"role":"user", ...}` to `messages`.
+2. App sends system + history + model params via SDK or raw HTTP.
+3. Model is stateless; it only sees **this** list. Reply arrives whole or as deltas.
+4. App takes `content` (or a tool call), stores `assistant`, waits for the next turn.
+5. Retrieval, functions, and the agent loop all insert logic between steps 1 and 4. The underlying call is still one chat completion.
+
+Phases 1–7 fill this map. They do not replace it.
 
 **📷 Image slot 0.5-A** — Folder tree screenshot from your IDE.
 
 ---
+
+
 
 ## Phase 1: Basic Calls — Send a message, get a reply
 
@@ -164,9 +333,12 @@ llm-forge/
 
 ---
 
+
+
 ### Step 1.1 Separate concerns in code ✅
 
 **Why split files?** Later phases add tools, RAG, and agents. Clean boundaries prevent spaghetti.
+
 
 | Module            | Responsibility         | Analogy           |
 | ----------------- | ---------------------- | ----------------- |
@@ -175,6 +347,7 @@ llm-forge/
 | `model.py`        | Which brain + knobs    | Model settings    |
 | `api/request.py`  | Send request           | Press "send"      |
 | `api/response.py` | Parse reply            | Read inbox        |
+
 
 - [x] Split `provider`
 - [x] Split `messages`
@@ -195,6 +368,8 @@ python main.py
 ```
 
 ---
+
+
 
 ### Step 1.2 OpenAI SDK — the shortcut layer ✅
 
@@ -223,6 +398,7 @@ POST /chat/completions + Authorization + JSON body → parse response
 
 **Deep dive: OpenAI-compatible providers**
 
+
 | Field      | DeepSeek                   | OpenAI                      |
 | ---------- | -------------------------- | --------------------------- |
 | `base_url` | `https://api.deepseek.com` | `https://api.openai.com/v1` |
@@ -230,9 +406,12 @@ POST /chat/completions + Authorization + JSON body → parse response
 | Auth       | `Bearer <key>`             | `Bearer <key>`              |
 | Body shape | Same                       | Same                        |
 
+
 **📷 Image slot 1.2-C** — Provider comparison table (your notes).
 
 ---
+
+
 
 ### Step 1.3 Native HTTP — see the wire format ✅
 
@@ -301,6 +480,8 @@ python main_native.py
 
 ---
 
+
+
 ### Step 1.4 Phase 1 checklist — mental model quiz
 
 Before moving on, you should be able to answer:
@@ -314,6 +495,8 @@ Before moving on, you should be able to answer:
 
 ---
 
+
+
 ## Phase 2: Streaming — Generate and display incrementally
 
 > **Goal:** Understand incremental delivery at both HTTP and application layers.
@@ -323,7 +506,10 @@ Before moving on, you should be able to answer:
 
 ---
 
+
+
 ### Step 2.1 Non-streaming vs streaming — two paradigms ✅
+
 
 |                | Non-streaming          | Streaming                        |
 | -------------- | ---------------------- | -------------------------------- |
@@ -332,6 +518,7 @@ Before moving on, you should be able to answer:
 | Client reads   | `response.json()` once | Loop: read chunk → chunk → …     |
 | UX             | Wait → full text       | Typewriter effect                |
 | Use case       | Batch, short replies   | Chat UI, long generation         |
+
 
 ```mermaid
 graph LR
@@ -348,11 +535,15 @@ graph LR
     end
 ```
 
+
+
 **📷 Image slot 2.1-A** — Terminal: `main.py` (pause then dump) vs `main_stream.py` (live output).
 
 **📷 Image slot 2.1-B** — Timeline diagram: server generating token-by-token.
 
 ---
+
+
 
 ### Step 2.2 SDK streaming — iterate chunks ✅
 
@@ -377,6 +568,8 @@ for chunk in stream:
 
 ---
 
+
+
 ### Step 2.3 Native HTTP streaming — SSE protocol ✅
 
 **SSE (Server-Sent Events)** — server pushes lines over one long-lived HTTP response:
@@ -393,7 +586,7 @@ data: [DONE]
 
 1. Read line by line from the socket
 2. Ignore empty lines
-3. Lines starting with `data: ` contain payload
+3. Lines starting with `data:`  contain payload
 4. `data: [DONE]` means stop
 5. Otherwise JSON-parse the payload and read `choices[0].delta.content`
 
@@ -403,11 +596,13 @@ data: [DONE]
 
 **📷 Image slot 2.3-A** — Raw SSE stream captured in terminal (`curl -N` output).
 
-**📷 Image slot 2.3-B** — Annotated SSE line: prefix `data: ` vs JSON payload vs `[DONE]`.
+**📷 Image slot 2.3-B** — Annotated SSE line: prefix `data:`  vs JSON payload vs `[DONE]`.
 
 **Files:** `native_http/stream.py`, `main_native_stream.py`
 
 ---
+
+
 
 ### Step 2.4 Phase 2 checklist
 
@@ -419,6 +614,8 @@ data: [DONE]
 
 ---
 
+
+
 ## Phase 3: Multi-turn Chat — Conversation memory
 
 > **Goal:** Maintain `messages` across turns so the model has context.
@@ -427,6 +624,8 @@ data: [DONE]
 **Status:** ✅ Done (SDK path); optional native path pending
 
 ---
+
+
 
 ### Step 3.1 Stateless model, stateful application ✅
 
@@ -449,6 +648,8 @@ sequenceDiagram
     API-->>App: "Alex"
 ```
 
+
+
 **Critical rule:** The API does not remember Turn 1 when you send Turn 2. **You** resend everything.
 
 - [x] Keep a persistent `messages` list in memory
@@ -460,6 +661,8 @@ sequenceDiagram
 **📷 Image slot 3.1-B** — Network tab showing request body size increasing each turn.
 
 ---
+
+
 
 ### Step 3.2 Session abstraction ✅
 
@@ -484,6 +687,8 @@ session.add_user("What's my name?")
 **📷 Image slot 3.2-A** — Class diagram: `ChatSession` methods and internal `_messages`.
 
 ---
+
+
 
 ### Step 3.3 Interactive loop + streaming reply ✅
 
@@ -517,6 +722,8 @@ python main_chat.py
 
 ---
 
+
+
 ### Step 3.4 Optional: native HTTP chat ⬜
 
 - [ ] Reuse `ChatSession` + `chat/loop.py` with `native_http/stream`
@@ -528,6 +735,8 @@ python main_chat.py
 
 ---
 
+
+
 ### Step 3.5 Phase 3 checklist
 
 - [ ] Why must assistant replies be appended to `messages`?
@@ -535,6 +744,8 @@ python main_chat.py
 - [ ] Where would you persist history for tomorrow's session? (preview: Phase 4+ / DB)
 
 ---
+
+
 
 ## Phase 4: Robustness — Production-ready calls
 
@@ -545,7 +756,10 @@ python main_chat.py
 
 ---
 
+
+
 ### Step 4.1 HTTP errors — know the failure modes
+
 
 | Code    | Name                  | Cause                | Your action        |
 | ------- | --------------------- | -------------------- | ------------------ |
@@ -555,6 +769,7 @@ python main_chat.py
 | 500     | Internal Server Error | Provider issue       | Retry with limit   |
 | 503     | Service Unavailable   | Overloaded           | Retry + jitter     |
 | Timeout | —                     | Network / slow model | Retry or abort     |
+
 
 ```mermaid
 graph TD
@@ -570,6 +785,8 @@ graph TD
     LIMIT -->|Yes| FAIL[Graceful failure]
 ```
 
+
+
 - [ ] Wrap API calls in try/except
 - [ ] Map status codes to user-facing messages
 - [ ] Log error body for debugging
@@ -581,6 +798,8 @@ graph TD
 **Planned files:** `utils/errors.py`, integrate into `api/request.py` and `chat/loop.py`
 
 ---
+
+
 
 ### Step 4.2 Retry with exponential backoff
 
@@ -601,6 +820,8 @@ wait 1s → retry → fail → wait 2s → retry → fail → wait 4s → ...
 **Planned file:** `utils/retry.py`
 
 ---
+
+
 
 ### Step 4.3 Tokens and context window
 
@@ -625,12 +846,14 @@ wait 1s → retry → fail → wait 2s → retry → fail → wait 4s → ...
 
 **Truncation strategies:**
 
+
 | Strategy                      | Pros               | Cons                     |
 | ----------------------------- | ------------------ | ------------------------ |
 | Drop oldest turns             | Simple             | Loses early context      |
 | Sliding window (last N turns) | Predictable        | May drop important facts |
 | Summarize old turns           | Keeps gist         | Extra API call           |
 | RAG over chat log             | Searchable history | More infra               |
+
 
 **📷 Image slot 4.3-A** — Diagram: context window filling up over long chat.
 
@@ -642,6 +865,8 @@ wait 1s → retry → fail → wait 2s → retry → fail → wait 4s → ...
 
 ---
 
+
+
 ### Step 4.4 Phase 4 deliverables
 
 - [ ] Chat survives a temporary 429
@@ -652,6 +877,8 @@ wait 1s → retry → fail → wait 2s → retry → fail → wait 4s → ...
 
 ---
 
+
+
 ## Phase 5: Tool Calling — Model meets the outside world
 
 > **Goal:** Model outputs structured "call this function" instead of only text.
@@ -660,6 +887,8 @@ wait 1s → retry → fail → wait 2s → retry → fail → wait 4s → ...
 **Status:** ⬜ Not started
 
 ---
+
+
 
 ### Step 5.1 What is a tool?
 
@@ -688,6 +917,8 @@ A **tool** = function schema you describe to the model + function you implement 
 
 ---
 
+
+
 ### Step 5.2 Tool calling flow (single tool)
 
 ```mermaid
@@ -707,6 +938,8 @@ sequenceDiagram
     Model-->>App: natural language answer
     App-->>User: It's sunny, 25°C in Beijing
 ```
+
+
 
 **New message types:**
 
@@ -731,6 +964,8 @@ sequenceDiagram
 
 ---
 
+
+
 ### Step 5.3 Multiple tools — model chooses
 
 - [ ] Register `get_weather`, `calculator`, `search_web`
@@ -743,7 +978,10 @@ sequenceDiagram
 
 ---
 
+
+
 ### Step 5.4 Tool calling vs traditional code
+
 
 | Traditional                            | Tool calling               |
 | -------------------------------------- | -------------------------- |
@@ -751,9 +989,12 @@ sequenceDiagram
 | Fixed routing rules                    | Flexible natural language  |
 | Brittle keyword matching               | Handles paraphrasing       |
 
+
 **📷 Image slot 5.4-A** — Comparison table in your notes.
 
 ---
+
+
 
 ### Step 5.5 Phase 5 checklist
 
@@ -763,6 +1004,8 @@ sequenceDiagram
 
 ---
 
+
+
 ## Phase 6: RAG — Retrieval-Augmented Generation
 
 > **Goal:** Answer from **your documents**, not just training data.
@@ -771,6 +1014,8 @@ sequenceDiagram
 **Status:** ⬜ Not started
 
 ---
+
+
 
 ### Step 6.1 The knowledge problem
 
@@ -787,6 +1032,8 @@ sequenceDiagram
 **📷 Image slot 6.1-A** — Meme-style diagram: "Model without RAG" vs "Model with RAG reading docs".
 
 ---
+
+
 
 ### Step 6.2 Embeddings — text to vectors
 
@@ -812,6 +1059,8 @@ Similar meaning → small distance (cosine / L2).
 
 ---
 
+
+
 ### Step 6.3 Chunking — split documents
 
 Long docs don't fit in context. Split into chunks:
@@ -823,11 +1072,13 @@ Document (5000 words)
   → ...
 ```
 
+
 | Parameter  | Tradeoff                              |
 | ---------- | ------------------------------------- |
 | Chunk size | Larger = more context, fewer chunks   |
 | Overlap    | Reduces boundary cutting mid-sentence |
 | Splitter   | By paragraph vs fixed token window    |
+
 
 - [ ] Load raw text / markdown
 - [ ] Split with overlap
@@ -839,9 +1090,12 @@ Document (5000 words)
 
 ---
 
+
+
 ### Step 6.4 Vector store — remember embeddings
 
 Simple → advanced:
+
 
 | Store               | Complexity | Use when             |
 | ------------------- | ---------- | -------------------- |
@@ -849,6 +1103,7 @@ Simple → advanced:
 | SQLite + numpy      | Medium     | Small datasets       |
 | Chroma / FAISS      | Medium     | Local apps           |
 | Pinecone / Weaviate | High       | Production scale     |
+
 
 - [ ] Embed all chunks
 - [ ] Save to store with IDs
@@ -859,6 +1114,8 @@ Simple → advanced:
 **Planned file:** `rag/store.py`
 
 ---
+
+
 
 ### Step 6.5 Retrieval — find relevant chunks
 
@@ -871,6 +1128,8 @@ graph LR
     PROMPT --> LLM[Chat completion]
     LLM --> A[Answer]
 ```
+
+
 
 **Similarity:** cosine similarity between query vector and chunk vectors.
 
@@ -896,7 +1155,10 @@ Question: {user_question}
 
 ---
 
+
+
 ### Step 6.6 RAG failure modes (important)
+
 
 | Problem       | Symptom                 | Mitigation                      |
 | ------------- | ----------------------- | ------------------------------- |
@@ -905,9 +1167,12 @@ Question: {user_question}
 | Hallucination | Answer not in chunks    | Cite sources, lower temperature |
 | Stale data    | Old info                | Re-index pipeline               |
 
+
 **📷 Image slot 6.6-A** — Your notes on a RAG failure you observed.
 
 ---
+
+
 
 ## Phase 7: Agents — Orchestration and autonomy
 
@@ -917,6 +1182,8 @@ Question: {user_question}
 **Status:** ⬜ Not started
 
 ---
+
+
 
 ### Step 7.1 What is an Agent?
 
@@ -938,13 +1205,18 @@ graph TD
     OBS --> THINK
 ```
 
+
+
 **📷 Image slot 7.1-A** — Agent loop diagram (classic ReAct: Reason + Act).
 
 **📷 Image slot 7.1-B** — Real product screenshot: Cursor / ChatGPT with tools enabled.
 
 ---
 
+
+
 ### Step 7.2 Agent = Chat + Tools + Loop + Guardrails
+
 
 | Component        | From phase | Role in agent     |
 | ---------------- | ---------- | ----------------- |
@@ -954,9 +1226,12 @@ graph TD
 | Tool calling     | Phase 5    | Actions           |
 | RAG              | Phase 6    | Knowledge         |
 
+
 **📷 Image slot 7.2-A** — Composition diagram: building blocks stacking into "Agent".
 
 ---
+
+
 
 ### Step 7.3 ReAct pattern (Reason + Act)
 
@@ -979,6 +1254,8 @@ Answer: It's sunny in Beijing, 25°C.
 **Planned file:** `agent/prompts.py`
 
 ---
+
+
 
 ### Step 7.4 Agent loop implementation
 
@@ -1005,7 +1282,10 @@ raise MaxStepsExceeded()
 
 ---
 
+
+
 ### Step 7.5 Agent memory types (ecosystem view)
+
 
 | Memory    | Duration        | Implementation        |
 | --------- | --------------- | --------------------- |
@@ -1014,13 +1294,17 @@ raise MaxStepsExceeded()
 | Long-term | Cross-session   | Vector DB + RAG       |
 | Episodic  | Past agent runs | Log + retrieval       |
 
+
 **📷 Image slot 7.5-A** — Memory pyramid diagram.
 
 ---
 
+
+
 ### Step 7.6 Multi-agent (preview — beyond this repo)
 
 Not required for llm-forge v1, but know the landscape:
+
 
 | Pattern  | Description                        |
 | -------- | ---------------------------------- |
@@ -1028,9 +1312,12 @@ Not required for llm-forge v1, but know the landscape:
 | Pipeline | Agent A → Agent B → Agent C        |
 | Debate   | Agents critique each other         |
 
+
 **📷 Image slot 7.6-A** — Multi-agent architecture from a blog or paper screenshot.
 
 ---
+
+
 
 ## Phase 8: Async and scale (optional advanced)
 
@@ -1041,13 +1328,17 @@ Not required for llm-forge v1, but know the landscape:
 
 ---
 
+
+
 ### Step 8.1 Sync vs async
+
 
 | Sync                       | Async                |
 | -------------------------- | -------------------- |
 | One call blocks until done | Many calls in flight |
 | Simple mental model        | Needs `asyncio`      |
 | Fine for CLI chat          | Better for servers   |
+
 
 - [ ] `AsyncOpenAI` client
 - [ ] `asyncio.gather()` for parallel calls
@@ -1059,37 +1350,44 @@ Not required for llm-forge v1, but know the landscape:
 
 ---
 
+
+
 ## Appendix A: Image index (for your notebook)
 
 Use this checklist to track which visuals you've created:
 
+
 | Slot ID | Topic                         | Done |
 | ------- | ----------------------------- | ---- |
-| 0.1-A   | Layered architecture          | ⬜   |
-| 0.1-B   | Provider docs screenshot      | ⬜   |
-| 0.2-A   | Request lifecycle sequence    | ⬜   |
-| 0.2-B   | Request JSON                  | ⬜   |
-| 0.2-C   | Response JSON                 | ⬜   |
-| 0.3-A   | Capability ladder             | ⬜   |
-| 0.4-A   | Message roles table           | ⬜   |
-| 0.4-B   | Messages growth over turns    | ⬜   |
-| 0.5-A   | Repo folder tree              | ⬜   |
-| 1.1-A   | Module diagram                | ⬜   |
-| 1.3-A   | Raw HTTP in REST client       | ⬜   |
-| 2.1-A   | Stream vs non-stream terminal | ⬜   |
-| 2.3-A   | Raw SSE output                | ⬜   |
-| 3.1-A   | Messages array growth         | ⬜   |
-| 3.3-A   | Multi-turn terminal demo      | ⬜   |
-| 4.3-A   | Context window filling        | ⬜   |
-| 5.2-A   | Tool call message list        | ⬜   |
-| 6.2-A   | Embedding similarity plot     | ⬜   |
-| 6.5-A   | RAG retrieval top-K           | ⬜   |
-| 7.1-A   | Agent loop diagram            | ⬜   |
-| 7.2-A   | Agent composition stack       | ⬜   |
+| 0.1-A   | Layered architecture          | ⬜    |
+| 0.1-B   | Provider docs screenshot      | ⬜    |
+| 0.2-A   | Request lifecycle sequence    | ⬜    |
+| 0.2-B   | Request JSON                  | ⬜    |
+| 0.2-C   | Response JSON                 | ⬜    |
+| 0.3-A   | Capability ladder             | ⬜    |
+| 0.4-A   | Message roles table           | ⬜    |
+| 0.4-B   | Messages growth over turns    | ⬜    |
+| 0.5-A   | Repo folder tree              | ⬜    |
+| 1.1-A   | Module diagram                | ⬜    |
+| 1.3-A   | Raw HTTP in REST client       | ⬜    |
+| 2.1-A   | Stream vs non-stream terminal | ⬜    |
+| 2.3-A   | Raw SSE output                | ⬜    |
+| 3.1-A   | Messages array growth         | ⬜    |
+| 3.3-A   | Multi-turn terminal demo      | ⬜    |
+| 4.3-A   | Context window filling        | ⬜    |
+| 5.2-A   | Tool call message list        | ⬜    |
+| 6.2-A   | Embedding similarity plot     | ⬜    |
+| 6.5-A   | RAG retrieval top-K           | ⬜    |
+| 7.1-A   | Agent loop diagram            | ⬜    |
+| 7.2-A   | Agent composition stack       | ⬜    |
+
 
 ---
 
+
+
 ## Appendix B: Glossary
+
 
 | Term                        | One-line definition                             |
 | --------------------------- | ----------------------------------------------- |
@@ -1106,15 +1404,19 @@ Use this checklist to track which visuals you've created:
 | **Agent**                   | LLM loop that plans and uses tools autonomously |
 | **ReAct**                   | Reason + Act agent pattern                      |
 
+
 **📷 Image slot B-A** — Your personal glossary flashcards.
 
 ---
 
+
+
 ## Appendix C: Current progress
 
-| Phase             | Status      | Entry files                               | Image slots to fill |
-| ----------------- | ----------- | ----------------------------------------- | ------------------- |
-| 0 Big picture     | 📖 Study    | —                                         | 0.1 – 0.5           |
+
+| Phase             | Status     | Entry files                               | Image slots to fill |
+| ----------------- | ---------- | ----------------------------------------- | ------------------- |
+| 0 Big picture     | 📖 Study   | —                                         | 0.1 – 0.5           |
 | 1 Basic calls     | ✅ Done     | `main.py`, `main_native.py`               | 1.1 – 1.4           |
 | 2 Streaming       | ✅ Done     | `main_stream.py`, `main_native_stream.py` | 2.1 – 2.4           |
 | 3 Multi-turn chat | ✅ Done     | `main_chat.py`                            | 3.1 – 3.5           |
@@ -1124,7 +1426,10 @@ Use this checklist to track which visuals you've created:
 | 7 Agents          | ⬜          | —                                         | 7.1 – 7.6           |
 | 8 Async           | ⬜ Optional | —                                         | 8.1                 |
 
+
 ---
+
+
 
 ## Appendix D: Suggested folder for your images
 
@@ -1150,7 +1455,10 @@ After adding an image, link it in this file:
 
 ---
 
+
+
 ## Next action
 
 1. **Study Part 0** — fill image slots 0.1–0.5 while re-running `main.py` and `main_native.py`
 2. **Say "next"** — start Phase 4 implementation (errors, retry, token truncation)
+

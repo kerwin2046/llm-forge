@@ -1,8 +1,8 @@
 DEFAULT_MODEL = "deepseek-v4-flash"
-
+AGENTS_MODEL = "agnes-2.0-flash"
 
 def chat_params(
-    model: str = DEFAULT_MODEL,
+    model: str = AGENTS_MODEL,
     stream: bool = False,
     reasoning_effort: str = "high",
 ) -> dict:
