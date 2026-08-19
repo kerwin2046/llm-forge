@@ -752,7 +752,7 @@ python main_chat.py
 > **Goal:** Handle failure, limits, and context overflow.
 > **Agent relevance:** Agents make many chained calls; one 429 should not crash the loop.
 
-**Status:** ⬜ Not started
+**Status:** ✅ Done
 
 ---
 
@@ -787,9 +787,9 @@ graph TD
 
 
 
-- [ ] Wrap API calls in try/except
-- [ ] Map status codes to user-facing messages
-- [ ] Log error body for debugging
+- [x] Wrap API calls in try/except
+- [x] Map status codes to user-facing messages
+- [x] Log error body for debugging
 
 **📷 Image slot 4.1-A** — Screenshot of a 429 response body / headers.
 
@@ -809,9 +809,9 @@ graph TD
 wait 1s → retry → fail → wait 2s → retry → fail → wait 4s → ...
 ```
 
-- [ ] Configurable max retries (e.g. 3)
-- [ ] Exponential backoff + random jitter
-- [ ] Respect `Retry-After` on 429
+- [x] Configurable max retries (e.g. 3)
+- [x] Exponential backoff + random jitter
+- [x] Respect `Retry-After` on 429
 
 **📷 Image slot 4.2-A** — Graph: retry attempt vs wait time.
 
@@ -841,7 +841,7 @@ wait 1s → retry → fail → wait 2s → retry → fail → wait 4s → ...
 
 - [ ] Count tokens with `tiktoken` (or provider tokenizer)
 - [ ] Detect when `messages` exceed budget
-- [ ] Truncate: keep `system` + last N turns
+- [x] Truncate: keep `system` + last N turns
 - [ ] Optional: summarize old turns instead of dropping
 
 **Truncation strategies:**
@@ -869,9 +869,9 @@ wait 1s → retry → fail → wait 2s → retry → fail → wait 4s → ...
 
 ### Step 4.4 Phase 4 deliverables
 
-- [ ] Chat survives a temporary 429
-- [ ] Chat survives 100+ turns without context error
-- [ ] Clear error message when API key is missing
+- [x] Chat survives a temporary 429
+- [x] Chat survives 100+ turns without context error
+- [x] Clear error message when API key is missing
 
 **📷 Image slot 4.4-A** — Demo: intentionally bad key → friendly error.
 
@@ -884,7 +884,7 @@ wait 1s → retry → fail → wait 2s → retry → fail → wait 4s → ...
 > **Goal:** Model outputs structured "call this function" instead of only text.
 > **Agent relevance:** Tools are the **hands** of an agent. No tools = no actions.
 
-**Status:** ⬜ Not started
+**Status:** ✅ Done
 
 ---
 
@@ -948,13 +948,13 @@ sequenceDiagram
 {"role": "tool", "tool_call_id": "call_abc", "content": "{\"temp\": 25, \"condition\": \"sunny\"}"}
 ```
 
-- [ ] Define tool schema in Python
-- [ ] Pass `tools=[...]` in API request
-- [ ] Detect `finish_reason == "tool_calls"`
-- [ ] Parse `tool_calls[0].function.name` and `.arguments`
-- [ ] Execute local function
-- [ ] Append `tool` message with result
-- [ ] Call model again for final answer
+- [x] Define tool schema in Python
+- [x] Pass `tools=[...]` in API request
+- [x] Detect `finish_reason == "tool_calls"`
+- [x] Parse `tool_calls[0].function.name` and `.arguments`
+- [x] Execute local function
+- [x] Append `tool` message with result
+- [x] Call model again for final answer
 
 **📷 Image slot 5.2-A** — Full message list after tool round-trip (4+ messages).
 
@@ -968,9 +968,9 @@ sequenceDiagram
 
 ### Step 5.3 Multiple tools — model chooses
 
-- [ ] Register `get_weather`, `calculator`, `search_web`
-- [ ] Model picks based on description quality
-- [ ] Handle direct text answer (no tool needed)
+- [x] Register `get_weather`, `calculator`, `search_web`
+- [x] Model picks based on description quality
+- [x] Handle direct text answer (no tool needed)
 
 **📷 Image slot 5.3-A** — Routing diagram: user question → which tool?
 
@@ -1420,8 +1420,8 @@ Use this checklist to track which visuals you've created:
 | 1 Basic calls     | ✅ Done     | `main.py`, `main_native.py`               | 1.1 – 1.4           |
 | 2 Streaming       | ✅ Done     | `main_stream.py`, `main_native_stream.py` | 2.1 – 2.4           |
 | 3 Multi-turn chat | ✅ Done     | `main_chat.py`                            | 3.1 – 3.5           |
-| 4 Robustness      | ⬜ Next     | —                                         | 4.1 – 4.4           |
-| 5 Tool calling    | ⬜          | —                                         | 5.1 – 5.5           |
+| 4 Robustness      | ✅ Done     | `utils/errors.py`, `utils/retry.py`, `chat/truncate.py` | 4.1 – 4.4 |
+| 5 Tool calling    | ✅ Done     | `tools/schema.py`, `tools/runner.py`, `main_tools.py`   | 5.1 – 5.5 |
 | 6 RAG             | ⬜          | —                                         | 6.1 – 6.6           |
 | 7 Agents          | ⬜          | —                                         | 7.1 – 7.6           |
 | 8 Async           | ⬜ Optional | —                                         | 8.1                 |
