@@ -1011,7 +1011,7 @@ sequenceDiagram
 > **Goal:** Answer from **your documents**, not just training data.
 > **Agent relevance:** RAG is how agents read manuals, codebases, and KB articles.
 
-**Status:** ⬜ Not started
+**Status:** ✅ Done
 
 ---
 
@@ -1179,7 +1179,7 @@ Question: {user_question}
 > **Goal:** Multi-step reasoning: plan → act → observe → repeat.
 > **This is where Phases 3–6 compose into one system.**
 
-**Status:** ⬜ Not started
+**Status:** ✅ Done
 
 ---
 
@@ -1422,8 +1422,8 @@ Use this checklist to track which visuals you've created:
 | 3 Multi-turn chat | ✅ Done     | `main_chat.py`                            | 3.1 – 3.5           |
 | 4 Robustness      | ✅ Done     | `utils/errors.py`, `utils/retry.py`, `chat/truncate.py` | 4.1 – 4.4 |
 | 5 Tool calling    | ✅ Done     | `tools/schema.py`, `tools/runner.py`, `main_tools.py`   | 5.1 – 5.5 |
-| 6 RAG             | ⬜          | —                                         | 6.1 – 6.6           |
-| 7 Agents          | ⬜          | —                                         | 7.1 – 7.6           |
+| 6 RAG             | ✅ Done     | `rag/embed.py`, `rag/chunk.py`, `rag/store.py`, `rag/retrieve.py`, `main_rag.py` | 6.1 – 6.6 |
+| 7 Agents          | ✅ Done     | `agent/prompts.py`, `agent/loop.py`, `main_agent.py` | 7.1 – 7.6 |
 | 8 Async           | ⬜ Optional | —                                         | 8.1                 |
 
 
