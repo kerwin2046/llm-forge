@@ -9,12 +9,12 @@ class ChatSession:
     ) -> None:
         self._system_prompt = system_prompt
         self._max_turns = max_turns
-        self._messages: list[dict[str, str]] = [
+        self._messages: list[dict] = [
             {"role": "system", "content": system_prompt},
         ]
 
     @property
-    def messages(self) -> list[dict[str, str]]:
+    def messages(self) -> list[dict]:
         return truncate_messages(self._messages, self._max_turns)
 
     def add_user(self, content: str) -> None:
@@ -22,6 +22,12 @@ class ChatSession:
 
     def add_assistant(self, content: str) -> None:
         self._messages.append({"role": "assistant", "content": content})
+
+    def append(self, message: dict) -> None:
+        self._messages.append(message)
+
+    def extend(self, messages: list[dict]) -> None:
+        self._messages.extend(messages)
 
     def clear(self) -> None:
         self._messages = [{"role": "system", "content": self._system_prompt}]

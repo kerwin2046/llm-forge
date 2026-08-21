@@ -1,44 +1,34 @@
 DEFAULT_MAX_TURNS = 20
 
-#   具体会失效的场景：
 
-#   1. 开头定义了关键信息 — 比如用户第 1 轮说"我是后端开发，只要 Python
-    #  方案"，聊了 30 轮后这条被截掉，模型开始推荐 Java 方案。
-
-#   2. 跨轮引用 — 用户说"按第 3 轮那个方案改一下"，但第 3
-    #  轮已经被截掉了，模型看不到。
-
-#   3. 长任务上下文 —
-    #  比如你让模型帮你逐步重构一个文件，前面的步骤被丢了，后面就接不上。
-
-#   更好的策略：
-
-#   ┌──────────────────┬───────────────────────────────────────┬──────────────────┐
-#   │ 策略             │ 思路                                  │ 代价             │
-#   ├──────────────────┼───────────────────────────────────────┼──────────────────┤
-#   │ 滑动窗口（当前） │ 只保留最近 N 轮                       │ 丢早期信息       │
-#   ├──────────────────┼───────────────────────────────────────┼──────────────────┤
-#   │ 摘要压缩         │ 把旧对话让模型总结成 1 条 system 消息 │ 多一次 API 调用  │
-#   ├──────────────────┼───────────────────────────────────────┼──────────────────┤
-#   │ RAG 检索历史     │ 把所有历史存向量库，按相关性召回      │ 需要额外基础设施 │
-#   ├──────────────────┼───────────────────────────────────────┼──────────────────┤
-#   │ 重要消息标记     │ 用户手动 pin 某些消息，永不截断       │ 增加交互复杂度   │
-#   └──────────────────┴───────────────────────────────────────┴──────────────────┘
-
-#   实际产品（比如 ChatGPT）通常是"滑动窗口 + 摘要"组合。
 def truncate_messages(
-    messages: list[dict[str, str]],
+    messages: list[dict],
     max_turns: int = DEFAULT_MAX_TURNS,
-) -> list[dict[str, str]]:
+) -> list[dict]:
     """
-    保留 system prompt + 最近 max_turns 轮对话。
-    一轮 = 一条 user + 一条 assistant，所以最多保留 max_turns * 2 条非 system 消息。
+    保留 system + 最近 max_turns 个以 user 开头的回合。
+
+    一个回合 = 一条 user，以及其后所有 assistant / tool 消息。
+    这样不会把 tool_calls 和对应的 tool 结果拆开。
     """
-    system = [m for m in messages if m["role"] == "system"]
-    history = [m for m in messages if m["role"] != "system"]
+    system = [m for m in messages if m.get("role") == "system"]
+    history = [m for m in messages if m.get("role") != "system"]
 
-    max_messages = max_turns * 2
-    if len(history) > max_messages:
-        history = history[-max_messages:]
+    turns: list[list[dict]] = []
+    current: list[dict] = []
+    for msg in history:
+        if msg.get("role") == "user":
+            if current:
+                turns.append(current)
+            current = [msg]
+        else:
+            if not current:
+                current = [msg]
+            else:
+                current.append(msg)
+    if current:
+        turns.append(current)
 
-    return system + history
+    kept = turns[-max_turns:] if len(turns) > max_turns else turns
+    flattened = [msg for turn in kept for msg in turn]
+    return system + flattened
